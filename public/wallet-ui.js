@@ -19,7 +19,13 @@
   `;
   document.head.appendChild(style);
 
-  const apiBase = () => location.port === '4318' ? '' : 'http://127.0.0.1:4318';
+  const apiBase = () => {
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      const local = location.hostname === '127.0.0.1' || location.hostname === 'localhost';
+      return local && location.port !== '4318' ? 'http://127.0.0.1:4318' : '';
+    }
+    return 'http://127.0.0.1:4318';
+  };
   let wallet = { balance: 0, reserved: 0, available: 0 };
   let quote = null;
   let currentUser = null;
