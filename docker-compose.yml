@@ -1,0 +1,15 @@
+services:
+  xiaokai:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - "4318:4318"
+    volumes:
+      - ./cloud-storage:/app/storage
+    environment:
+      HOST: 0.0.0.0
+      ACCOUNT_DATA_DIR: /app/storage/data
+      WALLET_DATA_DIR: /app/storage/data
+      GENERATED_DIR: /app/storage/generated

@@ -1,0 +1,21 @@
+{
+  "name": "xiaokai-kie-backend-v1",
+  "version": "1.0.0",
+  "private": true,
+  "description": "xiaokai 无限画布 Kie.ai 后端 V1",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node --check server.js && node --check src/model-router.js && node --check src/providers/kie.js && node --check src/providers/mock-image.js && node --check src/providers/otterl-image.js && node --check src/providers/otterl-chat.js && node --check src/providers/kie-chat.js && node --check src/agent-pricing.js && node --check src/accounts.js && node --check src/wallet.js && node --check public/wallet-ui.js",
+    "test:wallet": "node test-wallet.cjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  }
+}
