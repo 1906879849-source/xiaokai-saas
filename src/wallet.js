@@ -32,25 +32,11 @@ const PRICES = {
   'Agent · Gemini 3 Flash Thinking': { default: agentPricing.estimate('Gemini 3 Flash Thinking').total },
   'Agent · Gemini 3.1 Pro High': { default: agentPricing.estimate('Gemini 3.1 Pro High').total },
   'GPT Image 2': {
-    '1K': intEnv('PRICE_GPT_IMAGE_2_1K', 24),
-    '2K': intEnv('PRICE_GPT_IMAGE_2_2K', 24),
-    '4K': intEnv('PRICE_GPT_IMAGE_2_4K', 24),
-    default: intEnv('PRICE_GPT_IMAGE_2_2K', 24),
+    standard: intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24),
+    high: intEnv('PRICE_GPT_IMAGE_2_HIGH', 24),
+    default: intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24),
   },
   'GPT Image 2 · 4K 超分': { default: intEnv('PRICE_GPT_IMAGE_2_4K_UPSCALE', 24) },
-  'GPT Image 2 · 原生 4K': { default: intEnv('PRICE_GPT_IMAGE_2_NATIVE_4K', 40) },
-  'GPT Image 2.5 Flare': {
-    '1K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_1K', 24),
-    '2K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_2K', 24),
-    '4K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_4K', 24),
-    default: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_2K', 24),
-  },
-  'GPT Image 2.5 Sunburst': {
-    '1K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_1K', 24),
-    '2K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_2K', 24),
-    '4K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_4K', 24),
-    default: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_2K', 24),
-  },
   'Gemini 3 Pro Image': { default: intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80) },
   'Gemini 3.1 Flash Image': { default: intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60) },
 };
@@ -121,8 +107,10 @@ function publicWallet() {
 }
 
 function normalizeResolution(value) {
-  const normalized = String(value || '').toUpperCase().replace(/[^0-9K]/g, '');
-  return ['1K', '2K', '4K'].includes(normalized) ? normalized : '2K';
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === '4k') return '4K';
+  if (normalized === 'high' || normalized === '高质量') return 'high';
+  return 'standard';
 }
 
 function quote({ model, resolution, count = 1 }) {

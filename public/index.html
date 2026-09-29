@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>xiaokai 无限画布母版</title>
+  <title>kai无限画布</title>
   <style>
     :root { --bg:#08090b; --surface:#1c1d21; --line:#292c31; --text:#f1f2f4; --muted:#92969e; }
     * { box-sizing:border-box; }
@@ -155,7 +155,8 @@
     .ratio-icon.tall { width:9px; height:18px; }
     .ratio-icon.land { width:18px; height:13px; }
     .ratio-icon.port { width:11px; height:17px; }
-    .resolution-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:13px; }
+    .resolution-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(0,1fr)); gap:6px; margin-bottom:13px; }
+    .resolution-grid button[hidden] { display:none; }
     .count-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:4px; }
     .size-menu button { height:40px; border:1px solid transparent; border-radius:10px; background:#2b2c30; color:#d6d8dd; cursor:pointer; }
     .size-menu button:hover { background:#3a3d45; }
@@ -514,9 +515,6 @@
             <div class="model-group"><div class="model-group-head"><span class="model-logo gpt">G</span><span><b>GPT</b><small>OpenAI 图像模型</small></span></div>
               <button class="model-choice on" data-model="GPT Image 2" data-logo="G" data-class="gpt"><span>GPT Image 2</span><span class="model-check">✓</span></button>
               <button class="model-choice" data-model="GPT Image 2 · 4K 超分" data-logo="G" data-class="gpt"><span>GPT Image 2 · 4K 超分</span><span class="model-check">✓</span></button>
-              <button class="model-choice" data-model="GPT Image 2 · 原生 4K" data-logo="G" data-class="gpt"><span>GPT Image 2 · 原生 4K</span><span class="model-check">✓</span></button>
-              <button class="model-choice" data-model="GPT Image 2.5 Flare" data-logo="G" data-class="gpt"><span>GPT Image 2.5 Flare</span><span class="model-check">✓</span></button>
-              <button class="model-choice" data-model="GPT Image 2.5 Sunburst" data-logo="G" data-class="gpt"><span>GPT Image 2.5 Sunburst</span><span class="model-check">✓</span></button>
             </div>
             <div class="model-group"><div class="model-group-head"><span class="model-logo gemini">G</span><span><b>Gemini</b><small>Google 图像模型</small></span></div>
               <button class="model-choice" data-model="Gemini 3 Pro Image" data-logo="G" data-class="gemini"><span>Gemini 3 Pro Image</span><span class="model-check">✓</span></button>
@@ -535,7 +533,7 @@
               <button><span class="ratio-icon port"></span><span>3:4</span></button><button><span class="ratio-icon wide"></span><span>3:2</span></button><button><span class="ratio-icon port"></span><span>2:3</span></button><button><span class="ratio-icon land"></span><span>5:4</span></button><button><span class="ratio-icon port"></span><span>4:5</span></button>
               <button><span class="ratio-icon wide"></span><span>21:9</span></button><button><span class="ratio-icon auto"></span><span>自定义</span></button>
             </div>
-            <div class="option-label">分辨率</div><div class="resolution-grid"><button class="on">2K</button><button>1K</button><button>4K ✦</button></div>
+            <div class="option-label">画质</div><div class="resolution-grid"><button class="on" data-value="standard">标准</button><button data-value="high">高质量</button><button data-value="4K" hidden>4K</button></div>
             <div class="option-label">生成数量</div><div class="count-grid"><button class="on">1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button></div>
           </div>
         </div>
@@ -584,9 +582,6 @@
             <div class="api-model-group"><div class="api-model-group-head"><b>Image 模型</b><span>已对应当前生图模型菜单</span></div>
               <div class="api-model-row" data-model-name="GPT Image 2"><span class="api-model-name">GPT Image 2</span><input class="api-model-id" value="gpt-image-2" placeholder="填写平台对应 Model ID"><label class="api-enabled"><input type="checkbox" checked>启用</label></div>
               <div class="api-model-row" data-model-name="GPT Image 2 · 4K 超分"><span class="api-model-name">GPT Image 2 · 4K 超分</span><input class="api-model-id" value="gpt-image-2-4k超分" placeholder="填写平台对应 Model ID"><label class="api-enabled"><input type="checkbox" checked>启用</label></div>
-              <div class="api-model-row" data-model-name="GPT Image 2 · 原生 4K"><span class="api-model-name">GPT Image 2 · 原生 4K</span><input class="api-model-id" value="gpt-image-2-原生4k" placeholder="填写平台对应 Model ID"><label class="api-enabled"><input type="checkbox" checked>启用</label></div>
-              <div class="api-model-row" data-model-name="GPT Image 2.5 Flare"><span class="api-model-name">GPT Image 2.5 Flare</span><input class="api-model-id" value="gpt-image-2.5-flare" placeholder="填写平台对应 Model ID"><label class="api-enabled"><input type="checkbox" checked>启用</label></div>
-              <div class="api-model-row" data-model-name="GPT Image 2.5 Sunburst"><span class="api-model-name">GPT Image 2.5 Sunburst</span><input class="api-model-id" value="gpt-image-2.5-sunburst" placeholder="填写平台对应 Model ID"><label class="api-enabled"><input type="checkbox" checked>启用</label></div>
             </div>
             <div class="api-model-group"><div class="api-model-group-head"><b>Video 模型</b><span>预留给后续视频生成</span></div><div class="api-custom-row"><span>视频 Model ID</span><input class="api-model-id" data-api-custom-model="video" placeholder="按你选择的平台填写，例如 Sora 对应模型 ID"></div></div>
           </div>
@@ -854,14 +849,16 @@
       document.getElementById('projectName').textContent=data.name||'未命名项目';
       if(data.promptHtml!==undefined)promptBox.innerHTML=data.promptHtml||'';else promptBox.value=data.prompt||'';
       if(data.settings){
-        const restoredModel=data.settings.model||'GPT Image 2';
-        const restoredChoice=[...document.querySelectorAll('.model-choice')].find(b=>b.dataset.model===restoredModel);
+        const requestedModel=data.settings.model||'GPT Image 2';
+        const restoredChoice=[...document.querySelectorAll('.model-choice')].find(b=>b.dataset.model===requestedModel)||document.querySelector('.model-choice[data-model="GPT Image 2"]');
+        const restoredModel=restoredChoice?.dataset.model||'GPT Image 2';
         const restoredLabel=document.getElementById('modelLabel');restoredLabel.dataset.model=restoredModel;restoredLabel.textContent=restoredChoice?.dataset.display||restoredModel;
         document.querySelectorAll('.model-choice').forEach(b=>b.classList.toggle('on',b.dataset.model===data.settings.model));
         const chosen=document.querySelector('.model-choice.on');
         if(chosen){const logo=document.getElementById('modelLogo');logo.textContent=chosen.dataset.logo;logo.className='mini-model-logo '+chosen.dataset.class}
         const size=document.getElementById('sizeButton');size.textContent=data.settings.sizeText||'自适应 ▴';size.title=data.settings.sizeTitle||'';
         [['.background-grid',data.settings.background],['.ratio-grid',data.settings.ratio],['.resolution-grid',data.settings.resolution],['.count-grid',data.settings.count]].forEach(([selector,index])=>document.querySelectorAll(selector+' button').forEach((b,i)=>b.classList.toggle('on',i===index)));
+        configureResolutionForModel(restoredModel);
       }
       panX=Number(data.view?.panX)||0;panY=Number(data.view?.panY)||0;zoom=Math.max(.35,Math.min(2.5,Number(data.view?.zoom)||1));
       document.getElementById('zoomLabel').textContent=Math.round(zoom*100)+'%';
@@ -943,12 +940,15 @@
   document.querySelectorAll('.context-menu button').forEach(b=>b.onclick=()=>{menu.classList.remove('open');const action=b.dataset.action,x=(lastMenuX-panX)/zoom,y=(lastMenuY-panY)/zoom;if(action==='Agent 对话')return createAgentNode(x,y);if(action==='生图')return createGenerationNode(x,y);ripple(lastMenuX,lastMenuY);if(action==='文字')return createTextNode('text',x,y);if(action==='分组')return createGroupNode(x,y);if(action==='取消分组')return ungroupNode();if(action==='图片对比')return createCompareNode(x,y);if(action==='替换图片'){if(!contextNode?.querySelector('.card'))return note('请先右键一张图片');replacingNode=contextNode;document.getElementById('replaceImageUpload').click();return}document.getElementById('modeButton').textContent=action+' ▾';if(action==='视频'&&contextNode?.querySelector('.video-art')){selectNode(contextNode);note('已打开视频内容框');return}note('请先选择一个视频节点')});
   document.querySelectorAll('[data-edge-action]').forEach(b=>b.onclick=()=>{const action=b.dataset.edgeAction,path=selectedEdge;if(!path)return;if(action==='delete')return deleteEdge(path);if(action==='earlier'||action==='later'){const svg=document.querySelector('.wire'),before=[...svg.querySelectorAll('path[data-a][data-b]')],same=before.filter(p=>p.dataset.b===path.dataset.b),i=same.indexOf(path),swap=action==='earlier'?same[i-1]:same[i+1];if(!swap)return note('已经位于当前顺序边界');if(action==='earlier')svg.insertBefore(path,swap);else svg.insertBefore(swap,path);const after=[...svg.querySelectorAll('path[data-a][data-b]')],applyOrder=list=>{list.forEach(p=>svg.appendChild(p));wires()};commitHistory({undo:()=>applyOrder(before),redo:()=>applyOrder(after)});wires();scheduleSave();document.getElementById('edgeMenu').classList.remove('open');note('输入顺序已调整');return}const a=document.getElementById(path.dataset.a),z=document.getElementById(path.dataset.b);if(!a||!z)return;const svg=document.querySelector('.wire'),oldNext=path.nextSibling,text=createTextNode('text',(a.offsetLeft+z.offsetLeft)/2,(a.offsetTop+z.offsetTop)/2,'',false),created=[];path.remove();[[a,text],[text,z]].forEach(([from,to])=>{const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.dataset.a=from.id;p.dataset.b=to.id;svg.appendChild(p);bindEdge(p);created.push(p)});commitHistory({undo:()=>{created.forEach(p=>p.remove());text.remove();svg.insertBefore(path,oldNext);bindEdge(path);wires()},redo:()=>{path.remove();world.appendChild(text);created.forEach(p=>{svg.appendChild(p);bindEdge(p)});wires()}});selectedEdge=null;document.getElementById('edgeMenu').classList.remove('open');wires();note('已在连线上插入文字节点')});
   document.getElementById('modelSelect').onclick=e=>{e.stopPropagation();document.getElementById('modelMenu').classList.toggle('open')};
-  function applyModelChoice(model){const b=[...document.querySelectorAll('.model-choice')].find(x=>x.dataset.model===model);if(!b)return;document.querySelectorAll('.model-choice').forEach(x=>x.classList.remove('on'));b.classList.add('on');const label=document.getElementById('modelLabel');label.dataset.model=b.dataset.model;label.textContent=b.dataset.display||b.dataset.model;const logo=document.getElementById('modelLogo');logo.textContent=b.dataset.logo;logo.className='mini-model-logo '+b.dataset.class;scheduleSave()}
+  const FIXED_4K_IMAGE_MODELS=new Set(['GPT Image 2 · 4K 超分']);
+  function configureResolutionForModel(model){const buttons=[...document.querySelectorAll('.resolution-grid button')],fixed=FIXED_4K_IMAGE_MODELS.has(model);buttons.forEach(button=>{const is4K=button.dataset.value==='4K';button.hidden=fixed?!is4K:is4K;button.classList.toggle('on',fixed?is4K:(!is4K&&button.classList.contains('on')))});const visible=buttons.filter(button=>!button.hidden);if(!visible.some(button=>button.classList.contains('on'))&&visible[0])visible[0].classList.add('on');const ratio=document.querySelector('.ratio-grid .on')?.textContent.trim()||'自适应',quality=document.querySelector('.resolution-grid .on')?.textContent.trim()||(fixed?'4K':'标准'),count=document.querySelector('.count-grid .on')?.textContent.trim()||'1';document.getElementById('sizeButton').title=ratio+' · '+quality+' · '+count+' 张'}
+  function applyModelChoice(model){const b=[...document.querySelectorAll('.model-choice')].find(x=>x.dataset.model===model);if(!b)return;document.querySelectorAll('.model-choice').forEach(x=>x.classList.remove('on'));b.classList.add('on');const label=document.getElementById('modelLabel');label.dataset.model=b.dataset.model;label.textContent=b.dataset.display||b.dataset.model;const logo=document.getElementById('modelLogo');logo.textContent=b.dataset.logo;logo.className='mini-model-logo '+b.dataset.class;configureResolutionForModel(b.dataset.model);scheduleSave()}
   document.querySelectorAll('.model-choice').forEach(b=>b.onclick=e=>{e.stopPropagation();const label=document.getElementById('modelLabel'),before=label.dataset.model||label.textContent,after=b.dataset.model;if(before!==after){applyModelChoice(after);commitHistory({undo:()=>applyModelChoice(before),redo:()=>applyModelChoice(after)})}document.getElementById('modelMenu').classList.remove('open');note('已选择 '+(b.dataset.display||b.dataset.model))});
   document.getElementById('sizeButton').onclick=e=>{e.stopPropagation();document.getElementById('sizeMenu').classList.toggle('open')};
   function captureSizeState(){const idx=selector=>[...document.querySelectorAll(selector+' button')].findIndex(x=>x.classList.contains('on')),sizeButton=document.getElementById('sizeButton');return{background:idx('.background-grid'),ratio:idx('.ratio-grid'),resolution:idx('.resolution-grid'),count:idx('.count-grid'),text:sizeButton.textContent,title:sizeButton.title}}
   function applySizeState(st){[['.background-grid',st.background],['.ratio-grid',st.ratio],['.resolution-grid',st.resolution],['.count-grid',st.count]].forEach(([selector,index])=>document.querySelectorAll(selector+' button').forEach((x,i)=>x.classList.toggle('on',i===index)));const sizeButton=document.getElementById('sizeButton');sizeButton.textContent=st.text;sizeButton.title=st.title;scheduleSave()}
-  document.querySelectorAll('.background-grid button,.ratio-grid button,.resolution-grid button,.count-grid button').forEach(b=>b.onclick=e=>{e.stopPropagation();const before=captureSizeState();[...b.parentElement.children].forEach(x=>x.classList.remove('on'));b.classList.add('on');const ratio=document.querySelector('.ratio-grid .on').textContent.trim(),res=document.querySelector('.resolution-grid .on').textContent.replace(' ✦',''),count=document.querySelector('.count-grid .on').textContent;const sizeButton=document.getElementById('sizeButton');sizeButton.textContent=ratio+' ▴';sizeButton.title=ratio+' · '+res+' · '+count+' 张';const after=captureSizeState();if(JSON.stringify(before)!==JSON.stringify(after))commitHistory({undo:()=>applySizeState(before),redo:()=>applySizeState(after)});scheduleSave()});
+  document.querySelectorAll('.background-grid button,.ratio-grid button,.resolution-grid button,.count-grid button').forEach(b=>b.onclick=e=>{e.stopPropagation();const before=captureSizeState();[...b.parentElement.children].forEach(x=>x.classList.remove('on'));b.classList.add('on');const ratio=document.querySelector('.ratio-grid .on').textContent.trim(),res=document.querySelector('.resolution-grid .on').textContent.trim(),count=document.querySelector('.count-grid .on').textContent;const sizeButton=document.getElementById('sizeButton');sizeButton.textContent=ratio+' ▴';sizeButton.title=ratio+' · '+res+' · '+count+' 张';const after=captureSizeState();if(JSON.stringify(before)!==JSON.stringify(after))commitHistory({undo:()=>applySizeState(before),redo:()=>applySizeState(after)});scheduleSave()});
+  configureResolutionForModel(document.getElementById('modelLabel').dataset.model||document.getElementById('modelLabel').textContent);
   document.getElementById('promptLibrary').onclick=()=>{renderSkills();openDrawer('skillDrawer')};
   function connectedImages(n){if(!n?.isConnected)return [];return [...document.querySelectorAll('.wire path[data-a][data-b]')].filter(p=>p.dataset.b===n.id).map(p=>document.getElementById(p.dataset.a)).filter(source=>source?.querySelector('.uploaded-image'))}
   let promptRange=null;
@@ -2167,17 +2167,17 @@ splitGrid=async function(n){
   function optionText(selector,index,fallback=''){
     const buttons=[...document.querySelectorAll(selector+' button')];
     const button=buttons[Number(index)];
-    return button?.textContent?.replace('✦','').trim()||fallback;
+    return button?.dataset?.value||button?.textContent?.replace('✦','').trim()||fallback;
   }
   function taskParams(task,node){
     const st=parseState(task.sizeState||node?.dataset.sizeState||'');
     const aspectRatio=optionText('.ratio-grid',st.ratio,'自适应');
-    const resolution=optionText('.resolution-grid',st.resolution,'2K');
+    const resolution=optionText('.resolution-grid',st.resolution,'standard');
     const count=Math.max(1,Math.min(8,Number(optionText('.count-grid',st.count,'1'))||1));
     const background=optionText('.background-grid',st.background,'默认');
     return{aspectRatio,resolution,count,background};
   }
-  const KIE_IMAGE_MODELS=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','GPT Image 2 · 原生 4K','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
+  const KIE_IMAGE_MODELS=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
   function isRealModel(name){return KIE_IMAGE_MODELS.has(name)}
   function taskDuration(task){
     if(task.durationMs)return task.durationMs;
@@ -2369,7 +2369,7 @@ splitGrid=async function(n){
 /* MODEL_SELECTION_SYNC_FIX_V1_1 */
 (function(){
   let restoringNodeModel=false;
-  const supportedRealModels=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','GPT Image 2 · 原生 4K','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
+  const supportedRealModels=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
   const _applyModelChoiceSync=applyModelChoice;
   applyModelChoice=function(model){
     _applyModelChoiceSync(model);
@@ -2432,7 +2432,7 @@ splitGrid=async function(n){
 
 /* MODEL_SOURCE_OF_TRUTH_FIX_V1_2 */
 (function(){
-  const REAL_SUPPORTED_MODELS_V12=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','GPT Image 2 · 原生 4K','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
+  const REAL_SUPPORTED_MODELS_V12=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
   const modelLabelElV12=document.getElementById('modelLabel');
 
   function visibleModelV12(){

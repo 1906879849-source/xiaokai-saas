@@ -33,11 +33,8 @@
   // Keep the price visible before login as well. The server remains the source
   // of truth for billing; this is only a display fallback for the public canvas.
   const LOCAL_IMAGE_PRICES = {
-    'GPT Image 2': { '1K': 24, '2K': 24, '4K': 24, default: 24 },
+    'GPT Image 2': { standard: 24, high: 24, default: 24 },
     'GPT Image 2 · 4K 超分': { default: 24 },
-    'GPT Image 2 · 原生 4K': { default: 40 },
-    'GPT Image 2.5 Flare': { '1K': 24, '2K': 24, '4K': 24, default: 24 },
-    'GPT Image 2.5 Sunburst': { '1K': 24, '2K': 24, '4K': 24, default: 24 },
     'Gemini 3 Pro Image': { default: 80 },
     'Gemini 3.1 Flash Image': { default: 60 },
   };
@@ -124,7 +121,8 @@
   function currentParams() {
     const label = document.getElementById('modelLabel');
     const model = label?.dataset?.model || label?.textContent?.trim() || '';
-    const resolution = document.querySelector('.resolution-grid button.on')?.textContent?.replace('✦', '').trim() || '2K';
+    const resolutionButton = document.querySelector('.resolution-grid button.on');
+    const resolution = resolutionButton?.dataset?.value || resolutionButton?.textContent?.trim() || 'standard';
     const count = document.querySelector('.count-grid button.on')?.textContent?.trim() || '1';
     return { model, resolution, count };
   }
@@ -208,11 +206,11 @@
       const [history, pricing, rechargeData] = await Promise.all([json('/api/wallet/history?limit=30'), json('/api/pricing'), json('/api/recharges?limit=20')]);
       apply(history.wallet);
       const priceEl = document.getElementById('walletPrices'); priceEl.replaceChildren();
+      const priceLabels = { standard: '标准', high: '高质量', '4K': '4K' };
       Object.entries(pricing.prices).forEach(([name, values]) => {
         const row = document.createElement('div'); row.className = 'wallet-row';
-        const parts = Object.entries(values).filter(([key]) => key !== 'default').map(([key, value]) => `${key} ${value}`).join(' · ');
         const format = (points, suffix='') => `${points} 积分（¥${(points * (pricing.pointValueRmb || 0.01)).toFixed(2)}）${suffix}`;
-        const detail = Object.entries(values).filter(([key]) => key !== 'default').map(([key, value]) => `${key} ${format(value)}`).join(' · ');
+        const detail = Object.entries(values).filter(([key]) => key !== 'default').map(([key, value]) => `${priceLabels[key] || key} ${format(value)}`).join(' · ');
         const agentSuffix = name.startsWith('Agent ·') ? '（示例用量，实际按 token）' : ' / 张';
         row.innerHTML = `<span>${name}</span><b>${detail || (name.startsWith('Agent ·') ? '约 ' : '') + format(values.default, agentSuffix)}</b>`; priceEl.appendChild(row);
       });
