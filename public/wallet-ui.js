@@ -210,12 +210,13 @@
       apply(history.wallet);
       const priceEl = document.getElementById('walletPrices'); priceEl.replaceChildren();
       const priceLabels = { standard: '标准', high: '高质量', '4K': '4K' };
+      const modelLabels = { 'GPT Image 2 · 原生 4K': 'GPT Image 2 · 4K', 'GPT Image 2.5 Flare': 'GPT Image 2.5', 'GPT Image 2.5 Sunburst': 'GPT Image 2.5 Pro' };
       Object.entries(pricing.prices).forEach(([name, values]) => {
         const row = document.createElement('div'); row.className = 'wallet-row';
         const format = (points, suffix='') => `${points} 积分（¥${(points * (pricing.pointValueRmb || 0.01)).toFixed(2)}）${suffix}`;
         const detail = Object.entries(values).filter(([key]) => key !== 'default').map(([key, value]) => `${priceLabels[key] || key} ${format(value)}`).join(' · ');
         const agentSuffix = name.startsWith('Agent ·') ? '（示例用量，实际按 token）' : ' / 张';
-        row.innerHTML = `<span>${name}</span><b>${detail || (name.startsWith('Agent ·') ? '约 ' : '') + format(values.default, agentSuffix)}</b>`; priceEl.appendChild(row);
+        row.innerHTML = `<span>${modelLabels[name] || name}</span><b>${detail || (name.startsWith('Agent ·') ? '约 ' : '') + format(values.default, agentSuffix)}</b>`; priceEl.appendChild(row);
       });
       const ledger = document.getElementById('walletLedger'); ledger.replaceChildren();
       history.ledger.forEach(item => {
