@@ -64,7 +64,16 @@ function ensureAdminFromEnv() {
   const existingId = store.usernameIndex[normalized];
   if (existingId) {
     const existing = store.users[existingId];
-    if (existing.role !== 'admin') { existing.role = 'admin'; persist(); }
+    let changed = false;
+    if (existing.role !== 'admin') { existing.role = 'admin'; changed = true; }
+    // Railway 环境变量是管理员密码的来源。变量修改并重新部署后，
+    // 同步更新持久化账号，避免后台一直要求首次创建时的旧密码。
+    const configuredHash = passwordHash(password, existing.passwordSalt);
+    if (configuredHash !== existing.passwordHash) {
+      existing.passwordHash = configuredHash;
+      changed = true;
+    }
+    if (changed) persist();
     return;
   }
   if (password.length < 12) throw new Error('生产环境 ADMIN_PASSWORD 至少需要 12 位');
