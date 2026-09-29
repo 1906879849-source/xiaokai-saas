@@ -37,6 +37,17 @@ const PRICES = {
     default: intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24),
   },
   'GPT Image 2 · 4K 超分': { default: intEnv('PRICE_GPT_IMAGE_2_4K_UPSCALE', 24) },
+  'GPT Image 2 · 原生 4K': { default: intEnv('PRICE_GPT_IMAGE_2_NATIVE_4K', 40) },
+  'GPT Image 2.5 Flare': {
+    standard: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24),
+    high: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_HIGH', 24),
+    default: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24),
+  },
+  'GPT Image 2.5 Sunburst': {
+    standard: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24),
+    high: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_HIGH', 24),
+    default: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24),
+  },
   'Gemini 3 Pro Image': { default: intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80) },
   'Gemini 3.1 Flash Image': { default: intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60) },
 };

@@ -8,11 +8,14 @@ const GENERATED_DIR = process.env.GENERATED_DIR ? path.resolve(process.env.GENER
 const MODEL_IDS = {
   'GPT Image 2': 'gpt-image-2',
   'GPT Image 2 · 4K 超分': 'gpt-image-2-4k超分',
+  'GPT Image 2 · 原生 4K': 'gpt-image-2-原生4k',
+  'GPT Image 2.5 Flare': 'gpt-image-2.5-flare',
+  'GPT Image 2.5 Sunburst': 'gpt-image-2.5-sunburst',
   'Gemini 3 Pro Image': 'gemini-3-pro-image-preview',
   'Gemini 3.1 Flash Image': 'gemini-3.1-flash-image-preview',
 };
 
-const FIXED_4K_MODELS = new Set(['GPT Image 2 · 4K 超分']);
+const FIXED_4K_MODELS = new Set(['GPT Image 2 · 4K 超分', 'GPT Image 2 · 原生 4K']);
 
 function apiBase() {
   return (process.env.OTTERL_BASE_URL || 'https://otterl.com/v1').replace(/\/$/, '');

@@ -35,6 +35,9 @@
   const LOCAL_IMAGE_PRICES = {
     'GPT Image 2': { standard: 24, high: 24, default: 24 },
     'GPT Image 2 · 4K 超分': { default: 24 },
+    'GPT Image 2 · 原生 4K': { default: 40 },
+    'GPT Image 2.5 Flare': { standard: 24, high: 24, default: 24 },
+    'GPT Image 2.5 Sunburst': { standard: 24, high: 24, default: 24 },
     'Gemini 3 Pro Image': { default: 80 },
     'Gemini 3.1 Flash Image': { default: 60 },
   };

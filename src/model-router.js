@@ -9,6 +9,18 @@ const MODEL_REGISTRY = {
     provider: 'otterl', id: 'gpt-image-2-4k超分', taskApi: 'otterl', fixedResolution: '4K',
     supportsResolution: false, supportsImageInput: true,
   },
+  'GPT Image 2 · 原生 4K': {
+    provider: 'otterl', id: 'gpt-image-2-原生4k', taskApi: 'otterl', fixedResolution: '4K',
+    supportsResolution: false, supportsImageInput: true,
+  },
+  'GPT Image 2.5 Flare': {
+    provider: 'otterl', id: 'gpt-image-2.5-flare', taskApi: 'otterl',
+    supportsResolution: true, supportsImageInput: true,
+  },
+  'GPT Image 2.5 Sunburst': {
+    provider: 'otterl', id: 'gpt-image-2.5-sunburst', taskApi: 'otterl',
+    supportsResolution: true, supportsImageInput: true,
+  },
   'Gemini 3 Pro Image': {
     provider: 'otterl', id: 'gemini-3-pro-image-preview', taskApi: 'otterl',
     supportsResolution: true, supportsImageInput: true,
