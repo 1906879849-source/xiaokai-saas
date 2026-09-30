@@ -366,7 +366,7 @@
     .node-status[data-state="error"] .dot { background:#ff6b6b; }
     @keyframes pulseStatus { 0%,100%{ transform:scale(1); opacity:1 } 50%{ transform:scale(1.18); opacity:.82 } }
     .node-run-summary { position:absolute; left:10px; right:10px; bottom:10px; min-height:30px; display:flex; align-items:center; padding:7px 10px; border-radius:10px; background:rgba(10,12,16,.56); color:#e7ebf0; font-size:11px; line-height:1.45; backdrop-filter:blur(8px); pointer-events:none; }
-    .task-queue { position:absolute; right:18px; bottom:156px; z-index:12; width:272px; border:1px solid #30343a; border-radius:14px; background:rgba(16,17,20,.95); box-shadow:0 12px 34px rgba(0,0,0,.34); backdrop-filter:blur(10px); overflow:hidden; }
+    .task-queue { position:absolute; right:18px; bottom:156px; z-index:12; width:min(330px,calc(100vw - 36px)); border:1px solid #30343a; border-radius:14px; background:rgba(16,17,20,.95); box-shadow:0 12px 34px rgba(0,0,0,.34); backdrop-filter:blur(10px); overflow:hidden; }
     .task-queue-head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #272a30; color:#f1f3f6; font-size:13px; }
     .task-queue-head b { font-size:13px; }
     .task-queue-head span { color:#9197a2; font-size:12px; }
@@ -555,7 +555,7 @@
     <div class="zoom-bar"><button class="refresh-canvas-button" title="刷新界面（自动保存画布）" id="refreshCanvasButton">↻</button><button title="撤销 Ctrl+Z" id="undoButton" disabled>↶</button><button title="重做 Ctrl+Y" id="redoButton" disabled>↷</button><button title="显示全部内容" id="fitAllButton">▥</button><button class="zoom-value" id="zoomLabel" title="恢复 100%">100%</button></div>
     <button class="agent-button" id="agentButton">＋　Agent 节点</button>
     <div class="mini-map" id="miniMap" title="小地图：点击或拖动快速导航"><canvas id="miniMapCanvas"></canvas></div>
-    <div class="task-queue" id="taskQueue"><div class="task-queue-head"><div class="task-queue-title"><b>任务队列</b><span id="taskQueueMeta">空闲</span></div><div class="task-queue-actions"><button id="cancelActiveTask" title="取消当前运行任务">取消任务</button><button class="danger" id="clearTaskQueue" title="清空任务队列">清空</button></div></div><div class="task-queue-list" id="taskQueueList"><div class="task-empty">暂无任务</div></div></div>
+    <div class="task-queue" id="taskQueue"><div class="task-queue-head"><div class="task-queue-title"><b>任务队列</b><span id="taskQueueMeta">空闲</span></div><div class="task-queue-actions"><button id="recoverTaskResults" title="从后台查询原任务，不会重新生成或重复扣积分">找回结果</button><button id="cancelActiveTask" title="取消当前运行任务">取消任务</button><button class="danger" id="clearTaskQueue" title="清空任务队列">清空</button></div></div><div class="task-queue-list" id="taskQueueList"><div class="task-empty">暂无任务</div></div></div>
     <div class="selection-bar" id="selectionBar"><span id="selectionSummary">已选 1 个节点</span><button data-select-action="connect">一键连线</button><button data-select-action="group">打组</button><select id="alignSelect"><option value="">对齐与分布</option><option value="left">左对齐</option><option value="center">水平居中</option><option value="right">右对齐</option><option value="top">顶部对齐</option><option value="middle">垂直居中</option><option value="bottom">底部对齐</option><option value="distribute-x">水平分布</option><option value="distribute-y">垂直分布</option></select><button data-select-action="duplicate">创建副本</button><button data-select-action="lock">锁定</button><button data-select-action="collapse">折叠</button><button class="danger" data-select-action="delete">删除</button></div>
     <input id="projectImport" type="file" accept=".json,.xiaokai" hidden>
     <input id="replaceImageUpload" type="file" accept="image/*" hidden>
@@ -2566,9 +2566,10 @@ splitGrid=async function(n){
 })();
 
 
-/* KIE_TASK_RECOVERY_V1_3 */
+/* KIE_TASK_RECOVERY_V1_4 */
 (function(){
   const recoveringNodes=new WeakSet();
+  let manualRecoveryBusy=false;
 
   function savedProviderTasks(node){
     try{
@@ -2589,8 +2590,8 @@ splitGrid=async function(n){
     img.onload=()=>{try{bindNodeControls(node);syncNodeChrome(node);updateCompareNodes();wires();scheduleSave()}catch(error){console.warn('恢复图片后的界面绑定失败',error)}};
   }
 
-  async function recoverNode(node,providerTasks,{legacy=false}={}){
-    if(!node?.isConnected||node.querySelector('.uploaded-image')||recoveringNodes.has(node)||!providerTasks.length)return;
+  async function recoverNode(node,providerTasks,{legacy=false,quiet=false}={}){
+    if(!node?.isConnected||node.querySelector('.uploaded-image')||recoveringNodes.has(node)||!providerTasks.length)return false;
     recoveringNodes.add(node);
     const controller=new AbortController();
     const task={
@@ -2613,42 +2614,96 @@ splitGrid=async function(n){
       node.dataset.providerRecoveryState='done';
       setNodeStatus(node,'done','已恢复');
       await saveProject();
-      note(legacy?'已找回刷新前生成的图片':'已自动恢复生成结果');
+      if(!quiet)note(legacy?'已找回刷新前生成的图片':'已自动恢复生成结果');
+      return true;
     }catch(error){
       if(error?.name!=='AbortError'){
         node.dataset.providerRecoveryState='error';
         setNodeStatus(node,'error','恢复失败');
-        note('结果恢复失败：'+(error?.message||'未知错误'));
+        if(!quiet)note('结果恢复失败：'+(error?.message||'未知错误'));
         console.warn('图片结果恢复失败',error);
       }
+      return false;
     }finally{recoveringNodes.delete(node)}
   }
 
-  async function recoverKieTasks(){
-    const emptyNodes=[...document.querySelectorAll('.generation-node')].filter(node=>!node.querySelector('.uploaded-image'));
+  async function recoverKieTasks({manual=false}={}){
+    const allGenerationNodes=[...document.querySelectorAll('.generation-node')];
+    const emptyNodes=allGenerationNodes.filter(node=>!node.querySelector('.uploaded-image'));
     const claimed=new Set();
+    allGenerationNodes.forEach(node=>savedProviderTasks(node).forEach(x=>claimed.add(x.taskId)));
+    const recoveries=[];
     for(const node of emptyNodes){
       const tasks=savedProviderTasks(node);
-      tasks.forEach(x=>claimed.add(x.taskId));
-      if(tasks.length)recoverNode(node,tasks);
+      if(tasks.length)recoveries.push(recoverNode(node,tasks,{quiet:manual}));
+    }
+
+    if(manual){
+      try{
+        const data=await apiFetch('/api/tasks/recent?limit=30',{timeoutMs:10000});
+        const cutoff=Date.now()-72*60*60*1000;
+        const recent=(data.tasks||[]).filter(item=>
+          item?.taskId&&!claimed.has(item.taskId)&&['reserved','charged'].includes(item.state)&&
+          ['market','gpt4o','otterl','mock'].includes(item.taskApi||'market')&&Number(item.createdAt||0)>=cutoff
+        ).slice(0,6);
+        recent.forEach((item,index)=>{
+          const node=createGenerationNode(
+            (canvas.clientWidth/2-panX)/zoom+index*36,
+            (canvas.clientHeight/2-panY)/zoom+index*36
+          );
+          const tasks=[{taskId:item.taskId,taskApi:item.taskApi||'market',providerModel:item.model||''}];
+          node.querySelector('.node-label').textContent='▧　找回结果';
+          node.dataset.providerTasks=JSON.stringify(tasks);
+          node.dataset.providerModel=item.model||node.dataset.modelName||'GPT Image 2';
+          node.dataset.providerSubmittedAt=String(item.createdAt||Date.now());
+          node.dataset.providerRecoveryState='pending';
+          claimed.add(item.taskId);
+          recoveries.push(recoverNode(node,tasks,{legacy:true,quiet:true}));
+        });
+      }catch(error){
+        console.warn('读取后台图片任务失败',error);
+        note('找回失败：无法读取后台任务记录');
+        return false;
+      }
+      if(!recoveries.length){note('没有发现需要找回的图片任务');return false}
+      scheduleSave();
+      const results=await Promise.all(recoveries);
+      const recovered=results.filter(Boolean).length;
+      if(recovered)note(`已找回 ${recovered} 个生成结果`);
+      else note('暂时没有可加载的结果，请稍后再试');
+      window.KAI_WALLET?.refresh();
+      return recovered>0;
     }
 
     // 兼容升级前已经提交、但刷新时尚未把 taskId 写进节点的那一次任务。
     const legacyCandidates=emptyNodes.filter(node=>!savedProviderTasks(node).length&&['running','pending'].includes(node.dataset.runState||''));
-    if(legacyCandidates.length!==1)return;
+    if(legacyCandidates.length!==1)return Promise.all(recoveries);
     try{
       const data=await apiFetch('/api/tasks/recent?limit=12',{timeoutMs:10000});
       const recent=(data.tasks||[]).find(item=>item?.taskId&&!claimed.has(item.taskId)&&item.state!=='released');
-      if(!recent)return;
+      if(!recent)return Promise.all(recoveries);
       const node=legacyCandidates[0];
       const tasks=[{taskId:recent.taskId,taskApi:recent.taskApi||'market',providerModel:recent.model||''}];
       node.dataset.providerTasks=JSON.stringify(tasks);
       node.dataset.providerModel=recent.model||node.dataset.modelName||'GPT Image 2';
       node.dataset.providerSubmittedAt=String(recent.createdAt||Date.now());
       scheduleSave();
-      recoverNode(node,tasks,{legacy:true});
+      recoveries.push(recoverNode(node,tasks,{legacy:true}));
     }catch(error){console.warn('读取最近 Kie 任务失败',error)}
+    return Promise.all(recoveries);
   }
+
+  document.getElementById('recoverTaskResults')?.addEventListener('click',async event=>{
+    event.stopPropagation();
+    if(manualRecoveryBusy){note('正在查询后台任务，请稍候');return}
+    manualRecoveryBusy=true;
+    const button=event.currentTarget;
+    const previous=button.textContent;
+    button.disabled=true;button.textContent='查询中…';
+    note('正在从后台找回生成结果…');
+    try{await recoverKieTasks({manual:true})}
+    finally{manualRecoveryBusy=false;button.disabled=false;button.textContent=previous}
+  });
 
   const restoreProjectBeforeKieRecovery=restoreProject;
   restoreProject=function(data){
@@ -2657,6 +2712,7 @@ splitGrid=async function(n){
     return result;
   };
   setTimeout(recoverKieTasks,900);
+  window.KAI_TASK_RECOVERY={recoverAll:()=>recoverKieTasks({manual:true})};
 })();
 
 </script>
