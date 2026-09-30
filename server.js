@@ -435,11 +435,15 @@ app.get('/api/tasks/recent', (req, res) => {
 });
 
 let reconcilingWallet = false;
+const taskFreezeTimeoutMinutes = Math.max(1, Math.min(1440, Number(process.env.TASK_FREEZE_TIMEOUT_MINUTES) || 20));
+const taskFreezeTimeoutMs = taskFreezeTimeoutMinutes * 60 * 1000;
 async function reconcileWalletTasks() {
   if (reconcilingWallet) return;
   reconcilingWallet = true;
   try {
     for (const userId of wallet.listUserIds()) await wallet.runAs(userId, async () => {
+      const expired = wallet.releaseExpiredTasks(taskFreezeTimeoutMs);
+      if (expired.releasedPoints) console.warn('[wallet timeout release]', userId, expired.releasedPoints, 'points');
       for (const item of wallet.pendingTasks().slice(0, 20)) {
         try {
           const selectedProvider = providerFromTaskApi(item.taskApi || 'market');
@@ -456,6 +460,7 @@ async function reconcileWalletTasks() {
   }
 }
 setInterval(reconcileWalletTasks, 30000).unref();
+setTimeout(reconcileWalletTasks, 1500).unref();
 
 app.post('/api/callback/kie', (req, res) => {
   // V1 本地开发主要使用轮询。部署公网后可以在这里写入数据库并主动更新任务。

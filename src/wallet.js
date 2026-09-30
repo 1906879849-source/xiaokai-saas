@@ -4,9 +4,12 @@ const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
 const agentPricing = require('./agent-pricing');
 
-const DATA_DIR = process.env.WALLET_DATA_DIR
-  ? path.resolve(process.env.WALLET_DATA_DIR)
-  : path.join(__dirname, '..', 'data');
+const LEGACY_DATA_DIR = path.join(__dirname, '..', 'data');
+// 积分和账号必须落在同一个 Railway 持久化卷。优先使用专用变量，
+// 兼容已经配置好的 ACCOUNT_DATA_DIR / DATA_DIR，避免重新部署后积分归零。
+const configuredDataDir = process.env.WALLET_DATA_DIR || process.env.ACCOUNT_DATA_DIR || process.env.DATA_DIR;
+const DATA_DIR = configuredDataDir ? path.resolve(configuredDataDir) : LEGACY_DATA_DIR;
+const SHOULD_MIGRATE_LEGACY = !process.env.WALLET_DATA_DIR && DATA_DIR !== LEGACY_DATA_DIR;
 const WALLET_DIR = path.join(DATA_DIR, 'wallets');
 const context = new AsyncLocalStorage();
 const stores = new Map();
@@ -53,7 +56,16 @@ const PRICES = {
 };
 
 function currentUserId() { return String(context.getStore()?.userId || 'local').replace(/[^a-zA-Z0-9_-]/g, '_'); }
-function walletFile(userId) { return userId === 'local' ? path.join(DATA_DIR, 'wallet.json') : path.join(WALLET_DIR, `${userId}.json`); }
+function walletFileAt(baseDir, userId) { return userId === 'local' ? path.join(baseDir, 'wallet.json') : path.join(baseDir, 'wallets', `${userId}.json`); }
+function walletFile(userId) { return walletFileAt(DATA_DIR, userId); }
+function migrateLegacyWallet(userId) {
+  if (!SHOULD_MIGRATE_LEGACY) return;
+  const target = walletFile(userId);
+  const legacy = walletFileAt(LEGACY_DATA_DIR, userId);
+  if (fs.existsSync(target) || !fs.existsSync(legacy)) return;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.copyFileSync(legacy, target);
+}
 function blankStore(userId = currentUserId()) {
   const starting = userId === 'local' ? intEnv('WALLET_STARTING_CREDITS', 1000) : intEnv('ACCOUNT_SIGNUP_CREDITS', 0);
   return {
@@ -72,6 +84,7 @@ function blankStore(userId = currentUserId()) {
 
 function load(userId = currentUserId()) {
   fs.mkdirSync(WALLET_DIR, { recursive: true });
+  migrateLegacyWallet(userId);
   const file = walletFile(userId);
   if (!fs.existsSync(file)) return blankStore(userId);
   try {
@@ -105,6 +118,12 @@ function persist() {
 
 function runAs(userId, fn) { return context.run({ userId: String(userId || 'local') }, fn); }
 function listUserIds() {
+  if (SHOULD_MIGRATE_LEGACY) {
+    const legacyWalletDir = path.join(LEGACY_DATA_DIR, 'wallets');
+    if (fs.existsSync(legacyWalletDir)) {
+      fs.readdirSync(legacyWalletDir).filter(x => x.endsWith('.json')).forEach(name => migrateLegacyWallet(name.slice(0, -5)));
+    }
+  }
   if (!fs.existsSync(WALLET_DIR)) return [];
   return fs.readdirSync(WALLET_DIR).filter(x => x.endsWith('.json')).map(x => x.slice(0, -5));
 }
@@ -257,6 +276,52 @@ function settleTask(taskId, success, detail = {}) {
   return publicWallet();
 }
 
+function releaseExpiredTasks(maxAgeMs, now = Date.now()) {
+  const timeout = Number(maxAgeMs);
+  if (!Number.isFinite(timeout) || timeout < 0) throw new Error('任务超时时间无效');
+  const cutoff = Number(now) - timeout;
+  let releasedTasks = 0;
+  let releasedReservations = 0;
+  let releasedPoints = 0;
+  let changed = false;
+
+  Object.values(store.tasks).forEach(item => {
+    if (item.state !== 'reserved' || Number(item.createdAt || 0) > cutoff) return;
+    const points = Math.max(0, Number(item.price) || 0);
+    store.reserved = Math.max(0, store.reserved - points);
+    item.state = 'released';
+    item.settledAt = Number(now);
+    item.failCode = 'TASK_TIMEOUT';
+    addLedger('release', points, '任务超时自动返还', { taskId: item.taskId, reservationId: item.reservationId });
+    releasedTasks += 1;
+    releasedPoints += points;
+    changed = true;
+  });
+
+  Object.values(store.reservations).forEach(reservation => {
+    if (reservation.state !== 'reserved') return;
+    const children = Object.values(store.tasks).filter(item => item.reservationId === reservation.id);
+    if (children.length && children.every(item => item.state !== 'reserved')) {
+      reservation.state = 'settled';
+      reservation.settledAt = Number(now);
+      changed = true;
+      return;
+    }
+    if (children.length || Number(reservation.createdAt || 0) > cutoff) return;
+    const points = Math.max(0, Number(reservation.total) || 0);
+    store.reserved = Math.max(0, store.reserved - points);
+    reservation.state = 'released';
+    reservation.settledAt = Number(now);
+    addLedger('release', points, '未创建任务超时自动返还', { reservationId: reservation.id });
+    releasedReservations += 1;
+    releasedPoints += points;
+    changed = true;
+  });
+
+  if (changed) persist();
+  return { releasedTasks, releasedReservations, releasedPoints, wallet: publicWallet() };
+}
+
 function recentLedger(limit = 30) {
   return store.ledger.slice(0, Math.max(1, Math.min(100, Number(limit) || 30)));
 }
@@ -287,5 +352,5 @@ function pointValueRmb() { return POINT_VALUE_RMB; }
 module.exports = {
   publicWallet, quote, reserve, attachTasks, releaseUnattached,
   settleTask, settleVariableTask, recentLedger, pendingTasks, recentTasks, pricing, pointValueRmb, grant,
-  runAs, listUserIds,
+  releaseExpiredTasks, runAs, listUserIds,
 };
