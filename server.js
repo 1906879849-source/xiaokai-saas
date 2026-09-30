@@ -347,6 +347,10 @@ app.post('/api/image/generate', async (req, res) => {
     reservationId = held.reservation.id;
     const count = price.count;
     const rawImages = Array.isArray(body.images) ? body.images.slice(0, 14) : [];
+    const mask = String(body.mask || '').trim();
+    if (mask && !/^data:image\//i.test(mask)) {
+      return res.status(400).json({ ok: false, error: '消除蒙版格式无效' });
+    }
     const selectedProvider = selectImageProvider(modelName, model);
     const provider = selectedProvider.client;
     // Mock 完全离线；OtterL 的编辑接口直接接收原图；只有 KIE 需要先转为公网 URL。
@@ -365,6 +369,9 @@ app.post('/api/image/generate', async (req, res) => {
           aspectRatio: body.aspectRatio,
           resolution: body.resolution,
           imageUrls,
+          maskUrl: mask,
+          background: body.background,
+          operation: body.operation,
           callbackUrl,
       })
     ));

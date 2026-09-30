@@ -44,6 +44,9 @@
     .canvas.node-dragging .node.is-dragging { will-change:transform; }
     .canvas.node-dragging .wire path.active { animation:none; filter:none; }
     .canvas.node-dragging .node.is-dragging .card { transition:none; }
+    .canvas.node-dragging .dock,.canvas.panning .dock { opacity:0 !important; pointer-events:none !important; transition:none !important; }
+    .canvas.node-dragging .node-actions,.canvas.panning .node-actions { opacity:0 !important; transition:none !important; }
+    .canvas.node-dragging .wire path.active,.canvas.panning .wire path.active { animation:none; filter:none; }
     .node:active { cursor:grabbing; }
     .node.locked { cursor:not-allowed; }
     .node.locked .card { box-shadow:0 0 0 1px rgba(91,142,255,.28),0 10px 26px rgba(0,0,0,.18); }
@@ -641,12 +644,13 @@
 </main>
 <script>
   let nodes=[...document.querySelectorAll('.node')];
+  let editorHasEraseMarks=false;
   const canvas=document.getElementById('canvas'),world=document.getElementById('world'),dock=document.getElementById('dock'),menu=document.getElementById('contextMenu'),toast=document.getElementById('toast'),promptBox=document.getElementById('prompt'),run=document.getElementById('run'),agent=document.getElementById('agent'),imageUpload=document.getElementById('imageUpload'),imagePreview=document.getElementById('imagePreview'),previewStage=document.getElementById('previewStage'),previewCaption=document.getElementById('previewCaption'),toolEditor=document.getElementById('toolEditor'),editorCanvas=document.getElementById('editorCanvas'),editorContext=editorCanvas.getContext('2d'),miniMap=document.getElementById('miniMap'),miniMapCanvas=document.getElementById('miniMapCanvas'),miniMapContext=miniMapCanvas.getContext('2d');
   function promptPlainValue(){let out='';const walk=node=>{node.childNodes.forEach(child=>{if(child.nodeType===Node.TEXT_NODE)out+=child.nodeValue||'';else if(child.nodeType===Node.ELEMENT_NODE){if(child.classList?.contains('inline-mention'))out+=child.dataset.token||'';else if(child.tagName==='BR')out+='\n';else walk(child)}})};walk(promptBox);return out.replace(/\u00a0/g,' ')}
   Object.defineProperty(promptBox,'value',{configurable:true,get(){return promptPlainValue()},set(v){this.textContent=v||''}});
   Object.defineProperty(promptBox,'placeholder',{configurable:true,get(){return this.dataset.placeholder||''},set(v){this.dataset.placeholder=v||''}});
   if(dock.parentElement!==canvas)canvas.appendChild(dock);
-  let drag=null,selectedNode=null,contextNode=null,replacingNode=null,startX=0,startY=0,nodeX=0,nodeY=0,panX=0,panY=0,zoom=1,panning=false,lastMenuX=0,lastMenuY=0,uploadWorldX=0,uploadWorldY=0,editorNode=null,editorImage=null,editorMode='',editorRatio='free',drawing=false,moveFrom=null,moveGroup=null,moveFrame=null,dragDx=0,dragDy=0,connectionDrag=null,clipboardSnapshot=null,saveTimer=null,isRestoring=false,marqueeStart=null,selectedEdge=null,markerNode=null,activeProjectId=localStorage.getItem('xiaokai-active-project')||'default',previewNode=null,previewScale=1,previewMarkMode=false,previewPendingRegion=null,previewDraftMarker=null,previewDraftStart=null,miniMapState=null,miniMapDrag=false,miniMapFrame=null;
+  let drag=null,selectedNode=null,contextNode=null,replacingNode=null,startX=0,startY=0,nodeX=0,nodeY=0,panX=0,panY=0,zoom=1,panning=false,panFrame=null,lastMenuX=0,lastMenuY=0,uploadWorldX=0,uploadWorldY=0,editorNode=null,editorImage=null,editorMode='',editorRatio='free',drawing=false,moveFrom=null,moveGroup=null,moveFrame=null,dragWireItems=[],dragDx=0,dragDy=0,connectionDrag=null,clipboardSnapshot=null,saveTimer=null,isRestoring=false,marqueeStart=null,selectedEdge=null,markerNode=null,activeProjectId=localStorage.getItem('xiaokai-active-project')||'default',previewNode=null,previewScale=1,previewMarkMode=false,previewPendingRegion=null,previewDraftMarker=null,previewDraftStart=null,miniMapState=null,miniMapDrag=false,miniMapFrame=null;
   const dragVisualOffsets=new WeakMap();
 
   /* CORE_SAVE_RUNTIME_FIX_V1_4 */
@@ -692,7 +696,7 @@
   function applyFieldValue(el,value){if(el.type==='checkbox')el.checked=!!value;else el.value=value??'';el.dispatchEvent(new Event('input',{bubbles:true}));scheduleSave()}
   function bindFieldHistory(el){if(!el||el.dataset.historyBound)return;el.dataset.historyBound='1';let before=fieldValue(el);el.addEventListener('focus',()=>before=fieldValue(el));const commit=()=>{const after=fieldValue(el);if(after===before)return;const start=before;before=after;commitHistory({undo:()=>applyFieldValue(el,start),redo:()=>applyFieldValue(el,after)})};if(el.matches('select,input[type="checkbox"]'))el.addEventListener('change',commit);else el.addEventListener('blur',commit)}
   function syncNodeChrome(n){const card=n?.querySelector('.card');if(!card||!card.offsetWidth||!card.offsetHeight)return;const label=n.querySelector('.node-label');if(label)label.style.width=card.offsetWidth+'px';const midY=card.offsetTop+card.offsetHeight/2-11,input=n.querySelector(':scope > .plus-in'),output=n.querySelector(':scope > .plus:not(.plus-in)'),grip=n.querySelector(':scope > .resize-grip');if(input){input.style.left=(card.offsetLeft-34)+'px';input.style.right='auto';input.style.top=midY+'px'}if(output){output.style.left=(card.offsetLeft+card.offsetWidth+12)+'px';output.style.right='auto';output.style.top=midY+'px'}if(grip){grip.style.left=(card.offsetLeft+card.offsetWidth-9)+'px';grip.style.top=(card.offsetTop+card.offsetHeight-9)+'px';grip.style.right='auto';grip.style.bottom='auto'}}
-  function transform(){world.style.transform=`translate(${panX}px,${panY}px) scale(${zoom})`;nodes.filter(n=>n.isConnected).forEach(syncNodeChrome);wires();if(selectedNode)positionNodeUI(selectedNode);queueMiniMapRender()}
+  function transform(){world.style.transform=`translate3d(${panX}px,${panY}px,0) scale(${zoom})`;wires();if(selectedNode)positionNodeUI(selectedNode);queueMiniMapRender()}
   function wires({syncChrome=true,renderMap=true}={}){
     if(syncChrome)nodes.filter(n=>n.isConnected).forEach(syncNodeChrome);
     const paths=[...document.querySelectorAll('.wire path[data-a][data-b]')],bySource=new Map(),byTarget=new Map();
@@ -746,7 +750,7 @@
   const imageActions='<div class="node-actions"><button data-tool="expand">扩图</button><button data-tool="cutout">抠图</button><button data-tool="multi">多角度</button><button data-tool="erase">消除笔</button><button data-tool="crop">构图裁剪</button><button data-tool="grid">宫格切分</button><button data-tool="smart">智能改图</button><button data-tool="download">↓</button></div>';
   function requireRealImage(n){const img=n.querySelector('.uploaded-image');if(!img)note('此演示占位图没有原始文件，请先上传真实图片');return img}
   function openApiTool(n,tool){selectNode(n);const names={smart:'智能改图',expand:'扩图',multi:'多角度',prompt:'提示词反推'};dock.dataset.operation=tool;promptBox.placeholder=tool==='prompt'?'接入视觉模型 API 后，将自动反推当前图片提示词':'输入'+names[tool]+'要求……';promptBox.focus();note(names[tool]+'已就绪，执行前需要配置对应 API')}
-  async function openEditor(n,mode){const img=requireRealImage(n);if(!img)return;editorNode=n;editorMode=mode;editorRatio='free';editorImage=new Image();editorImage.src=img.src;await editorImage.decode();document.getElementById('editorTitle').textContent=mode==='erase'?'消除笔':'构图裁剪';document.getElementById('brushControl').hidden=mode!=='erase';document.getElementById('cropControls').hidden=mode!=='crop';document.querySelectorAll('#cropControls button').forEach((b,i)=>b.classList.toggle('on',i===0));redrawEditor();toolEditor.classList.add('open')}
+  async function openEditor(n,mode){const img=requireRealImage(n);if(!img)return;editorNode=n;editorMode=mode;editorRatio='free';editorHasEraseMarks=false;editorImage=new Image();editorImage.src=img.src;await editorImage.decode();document.getElementById('editorTitle').textContent=mode==='erase'?'AI 消除笔 · 涂抹要移除的区域':'构图裁剪';document.getElementById('editorApply').textContent=mode==='erase'?'AI 消除':'应用';document.getElementById('brushControl').hidden=mode!=='erase';document.getElementById('cropControls').hidden=mode!=='crop';document.querySelectorAll('#cropControls button').forEach((b,i)=>b.classList.toggle('on',i===0));redrawEditor();toolEditor.classList.add('open')}
   function redrawEditor(){if(!editorImage)return;let sx=0,sy=0,sw=editorImage.naturalWidth,sh=editorImage.naturalHeight;if(editorMode==='crop'&&editorRatio!=='free'){const ratio=Number(editorRatio),current=sw/sh;if(current>ratio){const next=sh*ratio;sx=(sw-next)/2;sw=next}else{const next=sw/ratio;sy=(sh-next)/2;sh=next}}editorCanvas.width=Math.round(sw);editorCanvas.height=Math.round(sh);editorContext.globalCompositeOperation='source-over';editorContext.clearRect(0,0,editorCanvas.width,editorCanvas.height);editorContext.drawImage(editorImage,sx,sy,sw,sh,0,0,editorCanvas.width,editorCanvas.height)}
   function closeEditor(){toolEditor.classList.remove('open');drawing=false}
   function setImageState(n,src,landscape){const img=n.querySelector('.uploaded-image');img.src=src;n.querySelector('.card').classList.toggle('landscape',landscape);selectNode(n)}
@@ -785,8 +789,27 @@
       dragVisualOffsets.set(x.n,{x:dragDx,y:dragDy});
       x.n.style.transform=`translate3d(${dragDx}px,${dragDy}px,0)`
     });
-    wires({syncChrome:false,renderMap:false});
-    if(selectedNode&&nodeSupportsDock(selectedNode)&&dock.classList.contains('open'))positionDockBelowNode(selectedNode)
+    updateDragWires();
+  }
+  function prepareDragWires(){
+    const moved=new Set((moveGroup||[]).map(item=>item.n.id));
+    const all=[...document.querySelectorAll('.wire path[data-a][data-b]')];
+    const incoming=new Map();
+    all.forEach(path=>{const list=incoming.get(path.dataset.b)||[];list.push(path);incoming.set(path.dataset.b,list)});
+    dragWireItems=all.filter(path=>moved.has(path.dataset.a)||moved.has(path.dataset.b)).map(path=>{
+      const ins=incoming.get(path.dataset.b)||[];
+      return{path,a:document.getElementById(path.dataset.a),b:document.getElementById(path.dataset.b),inIndex:ins.indexOf(path),inCount:ins.length}
+    })
+  }
+  function updateDragWires(){
+    dragWireItems.forEach(item=>{
+      const ab=nodeCardBox(item.a),bb=nodeCardBox(item.b);if(!ab||!bb)return;
+      const inOffset=(item.inIndex-(item.inCount-1)/2)*16;
+      const x1=ab.x+ab.w,y1=ab.y+ab.h/2,x2=bb.x,y2=bb.y+bb.h/2+inOffset,dx=x2-x1,dy=y2-y1;
+      let handle=Math.max(90,Math.min(310,Math.abs(dx)*.46+Math.abs(dy)*.08));
+      if(dx<0)handle=Math.max(130,Math.min(360,130+Math.abs(dx)*.25+Math.abs(dy)*.10));
+      item.path.setAttribute('d',`M${x1} ${y1} C${x1+handle} ${y1},${x2-handle} ${y2},${x2} ${y2}`)
+    })
   }
   function finishNodeDrag(e){
     if(!drag||!moveGroup)return;
@@ -794,12 +817,12 @@
     const active=drag,group=moveGroup,before=group.map(x=>({n:x.n,left:x.left,top:x.top}));
     const after=group.map(x=>({n:x.n,left:x.left+dragDx,top:x.top+dragDy}));
     group.forEach((x,i)=>{x.n.style.transform='';x.n.style.left=after[i].left+'px';x.n.style.top=after[i].top+'px';x.n.classList.remove('is-dragging');dragVisualOffsets.delete(x.n)});
-    drag=null;moveGroup=null;dragDx=0;dragDy=0;canvas.classList.remove('node-dragging');
+    drag=null;moveGroup=null;dragWireItems=[];dragDx=0;dragDy=0;canvas.classList.remove('node-dragging');
     if(after.some((x,i)=>x.left!==before[i].left||x.top!==before[i].top))commitHistory({undo:()=>{before.forEach(x=>{x.n.style.left=x.left+'px';x.n.style.top=x.top+'px'});wires();if(selectedNode)positionNodeUI(selectedNode)},redo:()=>{after.forEach(x=>{x.n.style.left=x.left+'px';x.n.style.top=x.top+'px'});wires();if(selectedNode)positionNodeUI(selectedNode)}});
     if(e?.pointerId!=null&&active.hasPointerCapture?.(e.pointerId)){try{active.releasePointerCapture(e.pointerId)}catch{}}
     wires();if(selectedNode)selectNode(selectedNode,false,true)
   }
-  function bindNode(n){n.onpointerdown=e=>{if(e.button!==0||e.target.closest('button,textarea,select,input'))return;e.preventDefault();const preserve=!e.shiftKey&&selectedNodes.size>1&&selectedNodes.has(n);selectNode(n,e.shiftKey,preserve);if(n.classList.contains('group-node')){const l=n.offsetLeft,t=n.offsetTop,r=l+n.offsetWidth,b=t+n.offsetHeight;nodes.filter(x=>x!==n&&x.isConnected).forEach(x=>{const cx=x.offsetLeft+x.offsetWidth/2,cy=x.offsetTop+x.offsetHeight/2;if(cx>l&&cx<r&&cy>t&&cy<b)selectedNodes.add(x)});selectedNodes.forEach(x=>x.querySelector('.card')?.classList.add('multi-selected'));updateSelectionBar()}if(e.shiftKey||n.classList.contains('locked'))return;drag=n;startX=e.clientX;startY=e.clientY;dragDx=0;dragDy=0;moveGroup=[...selectedNodes].filter(x=>!x.classList.contains('locked')).map(x=>({n:x,left:x.offsetLeft,top:x.offsetTop}));moveGroup.forEach(x=>x.n.classList.add('is-dragging'));canvas.classList.add('node-dragging');n.setPointerCapture(e.pointerId)};n.onpointermove=e=>{if(drag!==n||!moveGroup)return;if((e.buttons&1)===0){finishNodeDrag(e);return}dragDx=(e.clientX-startX)/zoom;dragDy=(e.clientY-startY)/zoom;if(!moveFrame)moveFrame=requestAnimationFrame(applyNodeDragFrame)};n.onpointerup=finishNodeDrag;n.onpointercancel=finishNodeDrag;n.onlostpointercapture=e=>{if(drag===n)finishNodeDrag(e)};n.ondblclick=e=>{if(e.target.closest('button,textarea,select,input')||n.classList.contains('agent-node')||n.classList.contains('text-node')||n.classList.contains('note-node')||n.classList.contains('group-node')||n.classList.contains('compare-node'))return;e.stopPropagation();openImagePreview(n)};bindNodeControls(n)}
+  function bindNode(n){n.onpointerdown=e=>{if(e.button!==0||e.target.closest('button,textarea,select,input'))return;e.preventDefault();const preserve=!e.shiftKey&&selectedNodes.size>1&&selectedNodes.has(n);selectNode(n,e.shiftKey,preserve);if(n.classList.contains('group-node')){const l=n.offsetLeft,t=n.offsetTop,r=l+n.offsetWidth,b=t+n.offsetHeight;nodes.filter(x=>x!==n&&x.isConnected).forEach(x=>{const cx=x.offsetLeft+x.offsetWidth/2,cy=x.offsetTop+x.offsetHeight/2;if(cx>l&&cx<r&&cy>t&&cy<b)selectedNodes.add(x)});selectedNodes.forEach(x=>x.querySelector('.card')?.classList.add('multi-selected'));updateSelectionBar()}if(e.shiftKey||n.classList.contains('locked'))return;drag=n;startX=e.clientX;startY=e.clientY;dragDx=0;dragDy=0;moveGroup=[...selectedNodes].filter(x=>!x.classList.contains('locked')).map(x=>({n:x,left:x.offsetLeft,top:x.offsetTop}));prepareDragWires();moveGroup.forEach(x=>x.n.classList.add('is-dragging'));canvas.classList.add('node-dragging');n.setPointerCapture(e.pointerId)};n.onpointermove=e=>{if(drag!==n||!moveGroup)return;if((e.buttons&1)===0){finishNodeDrag(e);return}dragDx=(e.clientX-startX)/zoom;dragDy=(e.clientY-startY)/zoom;if(!moveFrame)moveFrame=requestAnimationFrame(applyNodeDragFrame)};n.onpointerup=finishNodeDrag;n.onpointercancel=finishNodeDrag;n.onlostpointercapture=e=>{if(drag===n)finishNodeDrag(e)};n.ondblclick=e=>{if(e.target.closest('button,textarea,select,input')||n.classList.contains('agent-node')||n.classList.contains('text-node')||n.classList.contains('note-node')||n.classList.contains('group-node')||n.classList.contains('compare-node'))return;e.stopPropagation();openImagePreview(n)};bindNodeControls(n)}
   const dbPromise=new Promise((resolve,reject)=>{
     const openDb=version=>{
       let request;
@@ -908,12 +931,12 @@
   function compareSelectedImages(){const images=[...selectedNodes].filter(n=>n.querySelector('.uploaded-image')).slice(0,2);if(images.length!==2)return note('请框选两张已上传的图片');const x=Math.max(...images.map(n=>n.offsetLeft+n.offsetWidth))+190,y=(images[0].offsetTop+images[1].offsetTop)/2,compare=createCompareNode(x,y),svg=document.querySelector('.wire');images.forEach(source=>{const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.dataset.a=source.id;p.dataset.b=compare.id;svg.appendChild(p);bindEdge(p)});wires();updateCompareNodes();selectNode(compare);note('已创建双图对比节点')}
   function autoLayout(){const items=nodes.filter(n=>n.isConnected&&!n.classList.contains('locked')),before=items.map(n=>({n,left:n.offsetLeft,top:n.offsetTop}));items.forEach((n,i)=>{const col=i%3,row=Math.floor(i/3);n.style.left=120+col*700+'px';n.style.top=90+row*520+'px'});const after=items.map(n=>({n,left:n.offsetLeft,top:n.offsetTop}));commitHistory({undo:()=>{before.forEach(x=>{x.n.style.left=x.left+'px';x.n.style.top=x.top+'px'});wires()},redo:()=>{after.forEach(x=>{x.n.style.left=x.left+'px';x.n.style.top=x.top+'px'});wires()}});wires();note('画布节点已自动整理')}
   nodes.forEach(bindNode);document.querySelectorAll('.wire path[data-a][data-b]').forEach(bindEdge);
-  const nodeSpatialObserver=new MutationObserver(changes=>{if(changes.some(m=>m.target?.classList?.contains('node')))queueSpatialRefresh()});
+  const nodeSpatialObserver=new MutationObserver(changes=>{if(drag||panning||canvas.classList.contains('node-dragging'))return;if(changes.some(m=>m.target?.classList?.contains('node')))queueSpatialRefresh()});
   nodeSpatialObserver.observe(world,{subtree:true,attributes:true,attributeFilter:['style']});
   document.getElementById('clear').onclick=()=>{dock.classList.remove('open');selectedNodes.clear();selectedNode=null;document.querySelectorAll('.card').forEach(c=>c.classList.remove('selected','multi-selected'));updateSelectionBar();setActiveWires(null)};
   canvas.addEventListener('mousedown',e=>{if(e.button!==1)return;e.preventDefault();panning=true;startX=e.clientX;startY=e.clientY;nodeX=panX;nodeY=panY;canvas.classList.add('panning')});
-  window.addEventListener('mousemove',e=>{if(!panning)return;panX=nodeX+e.clientX-startX;panY=nodeY+e.clientY-startY;transform()});
-  window.addEventListener('mouseup',e=>{if(e.button===1){panning=false;canvas.classList.remove('panning');scheduleSave()}});
+  window.addEventListener('mousemove',e=>{if(!panning)return;panX=nodeX+e.clientX-startX;panY=nodeY+e.clientY-startY;if(!panFrame)panFrame=requestAnimationFrame(()=>{panFrame=null;world.style.transform=`translate3d(${panX}px,${panY}px,0) scale(${zoom})`})});
+  window.addEventListener('mouseup',e=>{if(e.button===1){if(panFrame){cancelAnimationFrame(panFrame);panFrame=null}world.style.transform=`translate3d(${panX}px,${panY}px,0) scale(${zoom})`;panning=false;canvas.classList.remove('panning');if(selectedNode)positionNodeUI(selectedNode);queueMiniMapRender();scheduleSave()}});
   window.addEventListener('pointerup',e=>{if(drag)finishNodeDrag(e)},true);
   window.addEventListener('pointercancel',e=>{if(drag)finishNodeDrag(e)},true);
   window.addEventListener('blur',()=>{if(drag)finishNodeDrag()});
@@ -936,7 +959,7 @@
   document.addEventListener('paste',e=>{if(e.target.closest('input,textarea,[contenteditable="true"]'))return;const files=[...e.clipboardData.files].filter(f=>f.type.startsWith('image/')),x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom;if(files.length){e.preventDefault();files.forEach((file,i)=>{const reader=new FileReader();reader.onload=()=>createImageNode(reader.result,file.name||'粘贴图片',x+i*28,y+i*28);reader.readAsDataURL(file)});addAssets(files);return}const text=e.clipboardData.getData('text/plain');if(text){e.preventDefault();createTextNode('text',x,y,text)}});
   document.getElementById('agentButton').onclick=()=>createAgentNode();document.getElementById('close').onclick=()=>agent.classList.remove('open');
   document.getElementById('previewClose').onclick=closeImagePreview;imagePreview.onclick=e=>{if(e.target===imagePreview)closeImagePreview()};document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;if(imagePreview.classList.contains('open'))closeImagePreview();if(toolEditor.classList.contains('open'))closeEditor();if(markerNode){markerNode.querySelector('.card')?.classList.remove('marking');markerNode=null;note('已结束图片标记')}});
-  function eraseAt(e){if(editorMode!=='erase')return;const r=editorCanvas.getBoundingClientRect(),x=(e.clientX-r.left)*editorCanvas.width/r.width,y=(e.clientY-r.top)*editorCanvas.height/r.height,size=Number(document.getElementById('brushSize').value)*editorCanvas.width/r.width;editorContext.save();editorContext.globalCompositeOperation='destination-out';editorContext.beginPath();editorContext.arc(x,y,size/2,0,Math.PI*2);editorContext.fill();editorContext.restore()}
+  function eraseAt(e){if(editorMode!=='erase')return;editorHasEraseMarks=true;const r=editorCanvas.getBoundingClientRect(),x=(e.clientX-r.left)*editorCanvas.width/r.width,y=(e.clientY-r.top)*editorCanvas.height/r.height,size=Number(document.getElementById('brushSize').value)*editorCanvas.width/r.width;editorContext.save();editorContext.globalCompositeOperation='destination-out';editorContext.beginPath();editorContext.arc(x,y,size/2,0,Math.PI*2);editorContext.fill();editorContext.restore()}
   editorCanvas.onpointerdown=e=>{if(editorMode!=='erase')return;drawing=true;editorCanvas.setPointerCapture(e.pointerId);eraseAt(e)};editorCanvas.onpointermove=e=>{if(drawing)eraseAt(e)};editorCanvas.onpointerup=()=>drawing=false;
   document.querySelectorAll('#cropControls button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#cropControls button').forEach(x=>x.classList.remove('on'));b.classList.add('on');editorRatio=b.dataset.ratio;redrawEditor()});
   document.getElementById('editorClose').onclick=closeEditor;document.getElementById('editorCancel').onclick=closeEditor;document.getElementById('editorApply').onclick=applyEditor;toolEditor.onclick=e=>{if(e.target===toolEditor)closeEditor()};
@@ -2288,6 +2311,8 @@ splitGrid=async function(n){
           provider:task.model==='test-image'?'mock':'kie',model:task.model,prompt:resolved,
           aspectRatio:params.aspectRatio,resolution:params.resolution,count:params.count,
           background:params.background,
+          operation:node.dataset.imageOperation||'',
+          mask:node.dataset.editMask||'',
           images:payload.images.map(x=>x.value).filter(Boolean)
         }
       });
@@ -2872,6 +2897,76 @@ splitGrid=async function(n){
   const style=document.createElement('style');
   style.textContent='.agent-skill-applied{margin-left:auto;color:#66d79a;font-size:12px;white-space:nowrap}.prompt-tool[title^="已应用"]{color:#8fc5ff;background:#242c38;border-radius:7px;padding:5px 9px}';
   document.head.appendChild(style);
+})();
+
+/* AI_CUTOUT_AND_ERASE_V1 */
+(function(){
+  const TOOL_MODEL='GPT Image 2';
+  const CUTOUT_PROMPT='Remove the entire background from the provided image. Preserve the subject exactly, including face, hair, clothing, product shape, fine edges, shadows that belong to the subject, colors and proportions. Return a clean PNG with true alpha transparency outside the subject. Do not add a new background, text, border, watermark or extra object.';
+  const ERASE_PROMPT='Edit the provided original image using the supplied transparency mask. Remove only the object or content inside the transparent painted region, then reconstruct the missing background naturally with matching texture, lighting, perspective and surrounding details. Keep every unmasked part of the original image unchanged. Do not add new objects, text, borders or watermarks.';
+
+  function toolSizeState(source,transparent){
+    const state=captureSizeState();
+    state.background=transparent?1:0;
+    state.count=0;
+    const standard=[...document.querySelectorAll('.resolution-grid button')].findIndex(button=>button.dataset.value==='standard');
+    if(standard>=0)state.resolution=standard;
+    const image=source?.querySelector('.uploaded-image');
+    const ratio=image?.naturalWidth&&image?.naturalHeight?image.naturalWidth/image.naturalHeight:1;
+    const choices=[...document.querySelectorAll('.ratio-grid button')];
+    let best=0,bestDistance=Infinity;
+    choices.forEach((button,index)=>{
+      const label=button.textContent.trim();
+      const match=label.match(/^(\d+):(\d+)$/);
+      if(!match)return;
+      const distance=Math.abs(Number(match[1])/Number(match[2])-ratio);
+      if(distance<bestDistance){bestDistance=distance;best=index}
+    });
+    state.ratio=best;
+    state.text=(choices[best]?.textContent.trim()||'自适应')+' ▴';
+    state.title=(choices[best]?.textContent.trim()||'自适应')+' · 标准 · 1 张';
+    return JSON.stringify(state);
+  }
+
+  function queueAiImageTool(source,operation,mask=''){
+    const image=requireRealImage(source);if(!image)return null;
+    const card=source.querySelector('.card');
+    const x=source.offsetLeft+(card?.offsetWidth||270)+210;
+    const y=source.offsetTop;
+    const target=createGenerationNode(x,y);if(!target)return null;
+    const isCutout=operation==='cutout';
+    const prompt=isCutout?CUTOUT_PROMPT:ERASE_PROMPT;
+    const sizeState=toolSizeState(source,isCutout);
+    target.dataset.modelName=TOOL_MODEL;
+    target.dataset.imageOperation=operation;
+    target.dataset.editMask=mask||'';
+    target.dataset.promptText=prompt;
+    target.dataset.promptHtml=prompt;
+    target.dataset.sizeState=sizeState;
+    const state=JSON.parse(sizeState);
+    target.dataset.aspectRatioLabel=[...document.querySelectorAll('.ratio-grid button')][state.ratio]?.textContent.trim()||'自适应';
+    const label=target.querySelector('.node-label');
+    if(label)label.textContent='▧　'+(isCutout?'AI 抠图结果':'AI 消除结果');
+    connectNodesAutomatically(source,target);
+    selectNode(target,false,true);
+    loadPromptFromNode(target);
+    queueNodeExecution(target,{lockedModel:TOOL_MODEL,lockedSizeState:sizeState,lockedPromptText:prompt,lockedPromptHtml:prompt});
+    note(isCutout?'AI 抠图已加入任务队列，成功后扣除积分':'AI 消除已加入任务队列，成功后扣除积分');
+    return target;
+  }
+
+  removeBackground=function(source){return queueAiImageTool(source,'cutout')};
+  applyEditor=function(){
+    if(!editorNode)return;
+    if(editorMode!=='erase'){
+      const source=editorNode,after=editorCanvas.toDataURL('image/png');
+      closeEditor();createDerivedImageNode(source,after,'裁剪',{fit:true});note('已生成裁剪结果并自动连线');return;
+    }
+    if(!editorHasEraseMarks){note('请先涂抹要消除的区域');return}
+    const source=editorNode,mask=editorCanvas.toDataURL('image/png');
+    closeEditor();queueAiImageTool(source,'erase',mask);
+  };
+  document.getElementById('editorApply').onclick=applyEditor;
 })();
 </script>
 </body></html>

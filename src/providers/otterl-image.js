@@ -51,6 +51,10 @@ function normalizeResolution(value) {
   return 'standard';
 }
 
+function normalizeBackground(value) {
+  return /透明|transparent/i.test(String(value || '')) ? 'transparent' : 'auto';
+}
+
 function openAiImageOptions(aspectRatio, resolution) {
   const portrait = new Set(['9:16', '3:4', '2:3', '4:5']);
   const landscape = new Set(['16:9', '4:3', '3:2', '5:4', '21:9']);
@@ -152,6 +156,7 @@ async function runTask(task) {
       response_format: 'url',
       ...openAiImageOptions(task.aspectRatio, task.resolution),
     };
+    if (task.background === 'transparent') common.background = 'transparent';
     let json;
     if (task.imageUrls.length) {
       const form = new FormData();
@@ -160,6 +165,10 @@ async function runTask(task) {
         const blob = await imageToBlob(task.imageUrls[index]);
         const ext = fileExtension(blob.type);
         form.append('image[]', blob, `reference-${index + 1}.${ext}`);
+      }
+      if (task.maskUrl) {
+        const maskBlob = await imageToBlob(task.maskUrl);
+        form.append('mask', maskBlob, `mask.${fileExtension(maskBlob.type)}`);
       }
       task.progress = 18;
       json = await otterFetch('/images/edits', { method: 'POST', body: form });
@@ -185,7 +194,7 @@ async function runTask(task) {
   }
 }
 
-async function createImageTask({ modelName, prompt, aspectRatio, resolution, imageUrls = [] }) {
+async function createImageTask({ modelName, prompt, aspectRatio, resolution, imageUrls = [], maskUrl = '', background = '', operation = '' }) {
   const normalizedResolution = FIXED_4K_MODELS.has(modelName) ? '4K' : normalizeResolution(resolution);
   const model = MODEL_IDS[modelName];
   if (!model) {
@@ -202,6 +211,9 @@ async function createImageTask({ modelName, prompt, aspectRatio, resolution, ima
     aspectRatio: normalizeAspectRatio(aspectRatio),
     resolution: normalizedResolution,
     imageUrls: Array.isArray(imageUrls) ? imageUrls.slice(0, 10) : [],
+    maskUrl: String(maskUrl || ''),
+    background: normalizeBackground(background),
+    operation: String(operation || ''),
     state: 'waiting',
     progress: 2,
     resultUrls: [],
