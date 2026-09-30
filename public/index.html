@@ -2627,7 +2627,61 @@ splitGrid=async function(n){
     }finally{recoveringNodes.delete(node)}
   }
 
-  async function recoverKieTasks({manual=false}={}){
+  function applyRecoveredAgentResult(node,item){
+    const text=String(item?.text||'').trim();
+    if(!node?.isConnected||!text)return false;
+    const box=ensureAgentResult(node);box.hidden=false;box.textContent=text;
+    node.dataset.outputText=text;
+    node.dataset.agentRequestId=item.requestId||node.dataset.agentRequestId||'';
+    node.dataset.agentTaskId=item.taskId||node.dataset.agentTaskId||'';
+    node.dataset.agentModel=item.model||node.dataset.agentModel||'';
+    node.dataset.agentUpdatedAt=String(item.settledAt||Date.now());
+    node.dataset.agentRecoveryState='done';
+    const modelSelect=node.querySelector('.agent-model');
+    if(modelSelect&&[...modelSelect.options].some(option=>option.value===item.model))modelSelect.value=item.model;
+    [...document.querySelectorAll('.wire path[data-a][data-b]')]
+      .filter(path=>path.dataset.a===node.id)
+      .map(path=>document.getElementById(path.dataset.b)).filter(Boolean)
+      .forEach(target=>{const field=target.matches('.text-node,.note-node')?target.querySelector('textarea'):null;if(field){field.value=text;field.dispatchEvent(new Event('input',{bubbles:true}));target.dataset.outputText=text}});
+    setNodeStatus(node,'done','已找回');
+    return true;
+  }
+
+  async function recoverAgentResults({manual=false}={}){
+    try{
+      const data=await apiFetch('/api/agent/results/recent?limit=30',{timeoutMs:10000});
+      window.KAI_WALLET?.apply(data.wallet);
+      const results=Array.isArray(data.results)?data.results:[];
+      const nodes=[...document.querySelectorAll('.agent-node')];
+      const claimed=new Set();
+      nodes.forEach(node=>{
+        if(node.dataset.agentRequestId)claimed.add('request:'+node.dataset.agentRequestId);
+        if(node.dataset.agentTaskId)claimed.add('task:'+node.dataset.agentTaskId);
+      });
+      let recovered=0;
+      for(const node of nodes){
+        if(String(node.dataset.outputText||'').trim())continue;
+        const item=results.find(result=>(node.dataset.agentRequestId&&result.requestId===node.dataset.agentRequestId)||(node.dataset.agentTaskId&&result.taskId===node.dataset.agentTaskId));
+        if(item&&applyRecoveredAgentResult(node,item))recovered+=1;
+      }
+      if(manual){
+        const cutoff=Date.now()-72*60*60*1000;
+        const unmatched=results.filter(item=>
+          Number(item.settledAt||item.createdAt||0)>=cutoff&&
+          !claimed.has('request:'+item.requestId)&&!claimed.has('task:'+item.taskId)
+        ).slice(0,6);
+        unmatched.forEach((item,index)=>{
+          const node=createAgentNode((canvas.clientWidth/2-panX)/zoom+index*42,(canvas.clientHeight/2-panY)/zoom+index*42);
+          const label=node.querySelector('.node-label');if(label)label.textContent='✦　找回的 Agent 对话';
+          if(applyRecoveredAgentResult(node,item))recovered+=1;
+        });
+      }
+      if(recovered){scheduleSave();try{await saveProject()}catch{}}
+      return recovered;
+    }catch(error){console.warn('读取 Agent 历史结果失败',error);return 0}
+  }
+
+  async function recoverKieTasks({manual=false,quiet=false}={}){
     const allGenerationNodes=[...document.querySelectorAll('.generation-node')];
     const emptyNodes=allGenerationNodes.filter(node=>!node.querySelector('.uploaded-image'));
     const claimed=new Set();
@@ -2662,17 +2716,16 @@ splitGrid=async function(n){
         });
       }catch(error){
         console.warn('读取后台图片任务失败',error);
-        note('找回失败：无法读取后台任务记录');
-        return false;
+        if(!quiet)note('找回失败：无法读取后台图片任务记录');
+        return 0;
       }
-      if(!recoveries.length){note('没有发现需要找回的图片任务');return false}
+      if(!recoveries.length){if(!quiet)note('没有发现需要找回的图片任务');return 0}
       scheduleSave();
       const results=await Promise.all(recoveries);
       const recovered=results.filter(Boolean).length;
-      if(recovered)note(`已找回 ${recovered} 个生成结果`);
-      else note('暂时没有可加载的结果，请稍后再试');
+      if(!quiet){if(recovered)note(`已找回 ${recovered} 个生成结果`);else note('暂时没有可加载的图片结果，请稍后再试')}
       window.KAI_WALLET?.refresh();
-      return recovered>0;
+      return recovered;
     }
 
     // 兼容升级前已经提交、但刷新时尚未把 taskId 写进节点的那一次任务。
@@ -2680,7 +2733,7 @@ splitGrid=async function(n){
     if(legacyCandidates.length!==1)return Promise.all(recoveries);
     try{
       const data=await apiFetch('/api/tasks/recent?limit=12',{timeoutMs:10000});
-      const recent=(data.tasks||[]).find(item=>item?.taskId&&!claimed.has(item.taskId)&&item.state!=='released');
+      const recent=(data.tasks||[]).find(item=>item?.taskId&&!claimed.has(item.taskId)&&item.state!=='released'&&['market','gpt4o','otterl','mock'].includes(item.taskApi||'market'));
       if(!recent)return Promise.all(recoveries);
       const node=legacyCandidates[0];
       const tasks=[{taskId:recent.taskId,taskApi:recent.taskApi||'market',providerModel:recent.model||''}];
@@ -2700,8 +2753,13 @@ splitGrid=async function(n){
     const button=event.currentTarget;
     const previous=button.textContent;
     button.disabled=true;button.textContent='查询中…';
-    note('正在从后台找回生成结果…');
-    try{await recoverKieTasks({manual:true})}
+    note('正在从后台找回图片和 Agent 对话…');
+    try{
+      const [images,agents]=await Promise.all([recoverKieTasks({manual:true,quiet:true}),recoverAgentResults({manual:true})]);
+      const total=Number(images||0)+Number(agents||0);
+      if(total)note(`已找回 ${images||0} 个图片结果、${agents||0} 个 Agent 对话`);
+      else note('没有发现可找回的图片或 Agent 对话');
+    }
     finally{manualRecoveryBusy=false;button.disabled=false;button.textContent=previous}
   });
 
@@ -2709,10 +2767,12 @@ splitGrid=async function(n){
   restoreProject=function(data){
     const result=restoreProjectBeforeKieRecovery(data);
     setTimeout(recoverKieTasks,180);
+    setTimeout(recoverAgentResults,260);
     return result;
   };
   setTimeout(recoverKieTasks,900);
-  window.KAI_TASK_RECOVERY={recoverAll:()=>recoverKieTasks({manual:true})};
+  setTimeout(recoverAgentResults,1100);
+  window.KAI_TASK_RECOVERY={recoverAll:()=>Promise.all([recoverKieTasks({manual:true,quiet:true}),recoverAgentResults({manual:true})])};
 })();
 
 </script>
@@ -2776,6 +2836,11 @@ splitGrid=async function(n){
       const skill=await selectedSkill(node);
       task.phase='generating';task.note='模型思考中';setNodeStatus(node,'running','思考中');renderTaskQueue();
       task.billingRequestId=task.billingRequestId||(globalThis.crypto?.randomUUID?.()||('agent-'+Date.now()+'-'+Math.random().toString(16).slice(2)));
+      node.dataset.agentRequestId=task.billingRequestId;
+      node.dataset.agentSubmittedAt=String(Date.now());
+      node.dataset.agentRecoveryState='pending';
+      scheduleSave();
+      try{await saveProject()}catch{}
       const result=await agentFetch('/api/agent/run',{
         method:'POST',controller,timeoutMs:210000,
         headers:{'Idempotency-Key':task.billingRequestId},
@@ -2789,6 +2854,9 @@ splitGrid=async function(n){
       });
       const text=String(result.text||'').trim();if(!text)throw new Error('Agent 没有返回文字');
       const box=ensureAgentResult(node);box.hidden=false;box.textContent=text;node.dataset.outputText=text;
+      node.dataset.agentTaskId=result.taskId||node.dataset.agentTaskId||'';
+      node.dataset.agentRequestId=result.requestId||task.billingRequestId;
+      node.dataset.agentRecoveryState='done';
       node.dataset.agentModel=result.model||task.model;node.dataset.agentUpdatedAt=String(Date.now());
       pushAgentTextToConnectedNodes(node,text);
       window.KAI_WALLET?.apply(result.wallet);

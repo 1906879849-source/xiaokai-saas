@@ -26,8 +26,19 @@ try {
   assert.equal(agentEstimate.billing, 'usage');
   const agentHold = wallet.reserve('agent-request', { ...agentEstimate, unit: 50, total: 50 });
   wallet.attachTasks(agentHold.reservation.id, [{ taskId: 'agent-task', taskApi: 'agent' }]);
-  wallet.settleVariableTask('agent-task', true, 8, { usage: { input_tokens: 2000, output_tokens: 1000 } });
+  wallet.settleVariableTask('agent-task', true, 8, {
+    usage: { input_tokens: 2000, output_tokens: 1000 },
+    resultText: '这是需要在刷新后找回的 Agent 回答。',
+    agentModel: 'GPT 5.5 Compact · Instant',
+    providerModel: 'gpt-5.5-chat',
+    quote: { total: 8, totalRmb: 0.08 },
+  });
   assert.deepEqual(wallet.publicWallet(), { balance: 72, reserved: 0, available: 72 });
+  assert.equal(wallet.taskByRequest('agent-request').resultText, '这是需要在刷新后找回的 Agent 回答。');
+  assert.equal(wallet.recentAgentResults(10)[0].text, '这是需要在刷新后找回的 Agent 回答。');
+  assert.equal(wallet.recentAgentResults(10)[0].requestId, 'agent-request');
+  assert.equal(wallet.recentLedger().find(x => x.type === 'charge').meta.resultText, undefined);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(testDir, 'wallet.json'), 'utf8')).tasks['agent-task'].resultText, '这是需要在刷新后找回的 Agent 回答。');
   const timeoutPrice = wallet.quote({ model: 'GPT Image 2', resolution: 'standard', count: 1 });
   const timeoutHold = wallet.reserve('timeout-request', timeoutPrice);
   wallet.attachTasks(timeoutHold.reservation.id, [{ taskId: 'timeout-task', taskApi: 'otterl' }]);
@@ -40,7 +51,7 @@ try {
   assert.equal(orphanResult.releasedReservations, 1);
   assert.equal(orphanResult.releasedPoints, 20);
   assert.deepEqual(wallet.publicWallet(), { balance: 72, reserved: 0, available: 72 });
-  console.log('PASS: billing, reserve, charge, refund, timeout release and idempotency.');
+  console.log('PASS: billing, persisted Agent results, reserve, charge, refund, timeout release and idempotency.');
 } finally {
   fs.rmSync(testDir, { recursive: true, force: true });
 }

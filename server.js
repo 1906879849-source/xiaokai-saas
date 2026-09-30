@@ -249,6 +249,18 @@ app.post('/api/agent/run', async (req, res) => {
     const requestId = String(req.get('Idempotency-Key') || body.requestId || '').trim();
     const held = wallet.reserve(requestId, reservePrice);
     if (held.duplicate) {
+      const prior = wallet.taskByRequest(requestId);
+      if (prior?.state === 'charged' && prior.resultText) {
+        return res.json({
+          ok: true, recovered: true, provider: 'otterl',
+          taskId: prior.taskId, requestId,
+          model: prior.agentModel || model,
+          providerModel: prior.providerModel || '',
+          text: prior.resultText,
+          quote: prior.quote || price,
+          wallet: wallet.publicWallet(),
+        });
+      }
       return res.status(409).json({ ok: false, error: '这个 Agent 请求已经提交，请勿重复点击', wallet: wallet.publicWallet() });
     }
     reservationId = held.reservation.id;
@@ -266,13 +278,20 @@ app.post('/api/agent/run', async (req, res) => {
       imageUrls,
     });
     const actualQuote = agentPricing.quoteFromUsage(model, result.usage);
-    wallet.settleVariableTask(billingTaskId, true, actualQuote.total, { providerCredits: result.providerCredits, usage: result.usage, quote: actualQuote, kind: 'agent' });
-    res.json({ ok: true, provider: 'otterl', model, ...result, quote: actualQuote, wallet: wallet.publicWallet() });
+    wallet.settleVariableTask(billingTaskId, true, actualQuote.total, {
+      providerCredits: result.providerCredits, usage: result.usage, quote: actualQuote, kind: 'agent',
+      resultText: result.text, agentModel: model, providerModel: result.providerModel,
+    });
+    res.json({ ok: true, provider: 'otterl', taskId: billingTaskId, requestId, model, ...result, quote: actualQuote, wallet: wallet.publicWallet() });
   } catch (error) {
     if (billingTaskId) wallet.settleVariableTask(billingTaskId, false, 0, { kind: 'agent', error: error?.message || 'Agent 调用失败' });
     else if (reservationId) wallet.releaseUnattached(reservationId, 'Agent 调用失败返还');
     safeJsonError(res, error);
   }
+});
+
+app.get('/api/agent/results/recent', (req, res) => {
+  res.json({ ok: true, results: wallet.recentAgentResults(req.query.limit), wallet: wallet.publicWallet() });
 });
 
 app.get('/api/credits', async (req, res) => {

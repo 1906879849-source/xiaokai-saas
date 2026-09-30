@@ -173,6 +173,7 @@ function quote({ model, resolution, count = 1 }) {
 function settleVariableTask(taskId, success, actualPrice, detail = {}) {
   const item = store.tasks[taskId];
   if (!item || item.state !== 'reserved') return publicWallet();
+  const { resultText, agentModel, providerModel, ...ledgerDetail } = detail || {};
   const held = item.price;
   store.reserved = Math.max(0, store.reserved - held);
   if (success) {
@@ -181,10 +182,14 @@ function settleVariableTask(taskId, success, actualPrice, detail = {}) {
     item.reservedPrice = held;
     item.price = charged;
     item.state = 'charged';
-    addLedger('charge', -charged, 'Agent 按实际用量扣除', { taskId, held, ...detail });
+    item.resultText = String(resultText || '').trim().slice(0, 200000);
+    item.agentModel = String(agentModel || '').trim().slice(0, 120);
+    item.providerModel = String(providerModel || '').trim().slice(0, 120);
+    if (ledgerDetail.quote && typeof ledgerDetail.quote === 'object') item.quote = ledgerDetail.quote;
+    addLedger('charge', -charged, 'Agent 按实际用量扣除', { taskId, held, ...ledgerDetail });
   } else {
     item.state = 'released';
-    addLedger('release', held, 'Agent 调用失败返还', { taskId, ...detail });
+    addLedger('release', held, 'Agent 调用失败返还', { taskId, ...ledgerDetail });
   }
   item.settledAt = Date.now();
   const reservation = store.reservations[item.reservationId];
@@ -228,7 +233,8 @@ function attachTasks(reservationId, taskItems) {
   const ids = [...new Set(items.map(item => item.taskId))];
   ids.forEach(taskId => {
     const meta = items.find(item => item.taskId === taskId) || {};
-    store.tasks[taskId] ||= { taskId, reservationId, price: reservation.unit, state: 'reserved', createdAt: Date.now() };
+    store.tasks[taskId] ||= { taskId, reservationId, requestId: reservation.requestId || '', price: reservation.unit, state: 'reserved', createdAt: Date.now() };
+    store.tasks[taskId].requestId ||= reservation.requestId || '';
     store.tasks[taskId].taskApi = meta.taskApi || store.tasks[taskId].taskApi || 'market';
     store.tasks[taskId].model = meta.model || reservation.model;
   });
@@ -346,11 +352,36 @@ function recentTasks(limit = 20) {
     .map(item => ({ ...item }));
 }
 
+function taskByRequest(requestId) {
+  const reservationId = store.requests[String(requestId || '')];
+  if (!reservationId) return null;
+  const item = Object.values(store.tasks).find(task => task.reservationId === reservationId);
+  return item ? { ...item } : null;
+}
+
+function recentAgentResults(limit = 20) {
+  return Object.values(store.tasks)
+    .filter(item => item.taskApi === 'agent' && item.state === 'charged' && String(item.resultText || '').trim())
+    .sort((a, b) => Number(b.settledAt || b.createdAt || 0) - Number(a.settledAt || a.createdAt || 0))
+    .slice(0, Math.max(1, Math.min(100, Number(limit) || 20)))
+    .map(item => ({
+      taskId: item.taskId,
+      requestId: item.requestId || '',
+      state: item.state,
+      text: item.resultText,
+      model: item.agentModel || String(item.model || '').replace(/^Agent\s*·\s*/, ''),
+      providerModel: item.providerModel || '',
+      quote: item.quote || null,
+      createdAt: item.createdAt || 0,
+      settledAt: item.settledAt || 0,
+    }));
+}
+
 function pricing() { return PRICES; }
 function pointValueRmb() { return POINT_VALUE_RMB; }
 
 module.exports = {
   publicWallet, quote, reserve, attachTasks, releaseUnattached,
   settleTask, settleVariableTask, recentLedger, pendingTasks, recentTasks, pricing, pointValueRmb, grant,
-  releaseExpiredTasks, runAs, listUserIds,
+  taskByRequest, recentAgentResults, releaseExpiredTasks, runAs, listUserIds,
 };
