@@ -39,6 +39,11 @@ try {
   assert.equal(wallet.recentAgentResults(10)[0].requestId, 'agent-request');
   assert.equal(wallet.recentLedger().find(x => x.type === 'charge').meta.resultText, undefined);
   assert.equal(JSON.parse(fs.readFileSync(path.join(testDir, 'wallet.json'), 'utf8')).tasks['agent-task'].resultText, '这是需要在刷新后找回的 Agent 回答。');
+  const failedAgentHold = wallet.reserve('agent-fail-request', { ...agentEstimate, unit: 10, total: 10 });
+  wallet.attachTasks(failedAgentHold.reservation.id, [{ taskId: 'agent-fail-task', taskApi: 'agent' }]);
+  wallet.settleVariableTask('agent-fail-task', false, 0, { error: '模型接口暂时不可用' });
+  assert.equal(wallet.taskByRequest('agent-fail-request').error, '模型接口暂时不可用');
+  assert.deepEqual(wallet.publicWallet(), { balance: 72, reserved: 0, available: 72 });
   const timeoutPrice = wallet.quote({ model: 'GPT Image 2', resolution: 'standard', count: 1 });
   const timeoutHold = wallet.reserve('timeout-request', timeoutPrice);
   wallet.attachTasks(timeoutHold.reservation.id, [{ taskId: 'timeout-task', taskApi: 'otterl' }]);

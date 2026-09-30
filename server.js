@@ -294,6 +294,28 @@ app.get('/api/agent/results/recent', (req, res) => {
   res.json({ ok: true, results: wallet.recentAgentResults(req.query.limit), wallet: wallet.publicWallet() });
 });
 
+app.get('/api/agent/status', (req, res) => {
+  const requestId = String(req.query.requestId || '').trim();
+  if (!requestId) return res.status(400).json({ ok: false, error: '缺少 Agent 请求编号' });
+  const item = wallet.taskByRequest(requestId);
+  if (!item || item.taskApi !== 'agent') return res.status(404).json({ ok: false, error: '没有找到这次 Agent 请求' });
+  res.json({
+    ok: true,
+    task: {
+      taskId: item.taskId,
+      requestId: item.requestId || requestId,
+      state: item.state,
+      text: item.resultText || '',
+      error: item.error || '',
+      model: item.agentModel || String(item.model || '').replace(/^Agent\s*·\s*/, ''),
+      quote: item.quote || null,
+      createdAt: item.createdAt || 0,
+      settledAt: item.settledAt || 0,
+    },
+    wallet: wallet.publicWallet(),
+  });
+});
+
 app.get('/api/credits', async (req, res) => {
   try {
     const credits = await kie.getCredits();

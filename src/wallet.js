@@ -189,6 +189,7 @@ function settleVariableTask(taskId, success, actualPrice, detail = {}) {
     addLedger('charge', -charged, 'Agent 按实际用量扣除', { taskId, held, ...ledgerDetail });
   } else {
     item.state = 'released';
+    item.error = String(ledgerDetail.error || 'Agent 调用失败，积分已返还').slice(0, 500);
     addLedger('release', held, 'Agent 调用失败返还', { taskId, ...ledgerDetail });
   }
   item.settledAt = Date.now();
@@ -298,6 +299,7 @@ function releaseExpiredTasks(maxAgeMs, now = Date.now()) {
     item.state = 'released';
     item.settledAt = Number(now);
     item.failCode = 'TASK_TIMEOUT';
+    item.error = '任务等待超时，积分已自动返还';
     addLedger('release', points, '任务超时自动返还', { taskId: item.taskId, reservationId: item.reservationId });
     releasedTasks += 1;
     releasedPoints += points;

@@ -382,6 +382,7 @@
     .task-queue-item small { display:block; margin-top:3px; color:#8f96a1; font-size:11px; line-height:1.45; }
     .task-empty { padding:14px 8px; color:#8f96a1; text-align:center; font-size:12px; }
     .agent-result { margin-top:12px; padding:10px 11px; border:1px solid #30343a; border-radius:10px; background:#14161a; color:#dfe3ea; font-size:12px; line-height:1.6; white-space:pre-wrap; }
+    .agent-result.error { border-color:rgba(255,97,97,.48); background:rgba(55,17,17,.72); color:#ffb0b0; }
 
 
     /* workflow queue + stronger run states */
@@ -2569,6 +2570,7 @@ splitGrid=async function(n){
 /* KIE_TASK_RECOVERY_V1_4 */
 (function(){
   const recoveringNodes=new WeakSet();
+  const recoveringAgentNodes=new WeakSet();
   let manualRecoveryBusy=false;
 
   function savedProviderTasks(node){
@@ -2630,7 +2632,7 @@ splitGrid=async function(n){
   function applyRecoveredAgentResult(node,item){
     const text=String(item?.text||'').trim();
     if(!node?.isConnected||!text)return false;
-    const box=ensureAgentResult(node);box.hidden=false;box.textContent=text;
+    const box=ensureAgentResult(node);box.hidden=false;box.classList.remove('error');box.textContent=text;
     node.dataset.outputText=text;
     node.dataset.agentRequestId=item.requestId||node.dataset.agentRequestId||'';
     node.dataset.agentTaskId=item.taskId||node.dataset.agentTaskId||'';
@@ -2645,6 +2647,40 @@ splitGrid=async function(n){
       .forEach(target=>{const field=target.matches('.text-node,.note-node')?target.querySelector('textarea'):null;if(field){field.value=text;field.dispatchEvent(new Event('input',{bubbles:true}));target.dataset.outputText=text}});
     setNodeStatus(node,'done','已找回');
     return true;
+  }
+
+  function showAgentRecoveryError(node,message){
+    if(!node?.isConnected)return;
+    const box=ensureAgentResult(node);box.hidden=false;box.classList.add('error');box.textContent='Agent 运行失败：'+message;
+    node.dataset.agentLastError=message;
+    node.dataset.agentRecoveryState='error';
+    setNodeStatus(node,'error','失败');
+    scheduleSave();
+  }
+
+  async function recoverAgentNodeStatus(node,{wait=false}={}){
+    const requestId=node?.dataset?.agentRequestId||'';
+    if(!requestId||String(node.dataset.outputText||'').trim()||recoveringAgentNodes.has(node))return false;
+    recoveringAgentNodes.add(node);
+    const deadline=Date.now()+(wait?4*60*1000:1);
+    let lastError='';
+    try{
+      do{
+        try{
+          const data=await apiFetch('/api/agent/status?requestId='+encodeURIComponent(requestId),{timeoutMs:10000});
+          window.KAI_WALLET?.apply(data.wallet);
+          const item=data.task||{};
+          if(item.state==='charged'&&item.text)return applyRecoveredAgentResult(node,item);
+          if(item.state==='released'){showAgentRecoveryError(node,item.error||'调用没有成功，冻结积分已返还');return false}
+          setNodeStatus(node,'running','等待结果');
+          lastError='';
+        }catch(error){lastError=error?.message||'没有找到后台任务记录'}
+        if(!wait||Date.now()>=deadline)break;
+        await new Promise(resolve=>setTimeout(resolve,3000));
+      }while(Date.now()<deadline);
+      if(lastError)showAgentRecoveryError(node,lastError+'；本次没有正式扣分');
+      return false;
+    }finally{recoveringAgentNodes.delete(node)}
   }
 
   async function recoverAgentResults({manual=false}={}){
@@ -2664,6 +2700,9 @@ splitGrid=async function(n){
         const item=results.find(result=>(node.dataset.agentRequestId&&result.requestId===node.dataset.agentRequestId)||(node.dataset.agentTaskId&&result.taskId===node.dataset.agentTaskId));
         if(item&&applyRecoveredAgentResult(node,item))recovered+=1;
       }
+      const pending=nodes.filter(node=>!String(node.dataset.outputText||'').trim()&&node.dataset.agentRequestId);
+      const statusResults=await Promise.all(pending.map(node=>recoverAgentNodeStatus(node,{wait:!manual})));
+      recovered+=statusResults.filter(Boolean).length;
       if(manual){
         const cutoff=Date.now()-72*60*60*1000;
         const unmatched=results.filter(item=>
@@ -2826,6 +2865,18 @@ splitGrid=async function(n){
     pushAgentOutputDownstream(agentNode,text);
   }
 
+  async function compactAgentImage(source){
+    const value=String(source||'');
+    if(!value||(/^data:image\//i.test(value)&&value.length<2200000))return value;
+    try{
+      const image=new Image();image.crossOrigin='anonymous';image.src=value;await image.decode();
+      const maxSide=1600,scale=Math.min(1,maxSide/Math.max(image.naturalWidth,image.naturalHeight));
+      const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
+      const context=canvas.getContext('2d');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
+      return canvas.toDataURL('image/jpeg',.84);
+    }catch(error){console.warn('Agent 参考图压缩失败，使用原图',error);return value}
+  }
+
   async function runAgent(task,node){
     const controller=new AbortController();controllers.set(task.id,controller);
     const started=Date.now();task.startedAt=started;task.status='running';task.phase='uploading';task.note='连接 Agent 模型';
@@ -2834,6 +2885,8 @@ splitGrid=async function(n){
       const payload=collectInputPayload(node);
       const fields=[...node.querySelectorAll('.agent-fields textarea')];
       const skill=await selectedSkill(node);
+      task.note='正在优化参考图';renderTaskQueue();
+      const compactedImages=await Promise.all(payload.images.slice(0,6).map(item=>compactAgentImage(item.value)));
       task.phase='generating';task.note='模型思考中';setNodeStatus(node,'running','思考中');renderTaskQueue();
       task.billingRequestId=task.billingRequestId||(globalThis.crypto?.randomUUID?.()||('agent-'+Date.now()+'-'+Math.random().toString(16).slice(2)));
       node.dataset.agentRequestId=task.billingRequestId;
@@ -2849,11 +2902,11 @@ splitGrid=async function(n){
           metaPrompt:fields[0]?.value.trim()||'',userNeed:fields[1]?.value.trim()||'',
           skillName:skill.name,skillContent:skill.content,
           contextTexts:payload.texts.map(x=>({label:x.label,value:x.value})),
-          images:payload.images.map(x=>x.value).filter(Boolean)
+          images:compactedImages.filter(Boolean)
         }
       });
       const text=String(result.text||'').trim();if(!text)throw new Error('Agent 没有返回文字');
-      const box=ensureAgentResult(node);box.hidden=false;box.textContent=text;node.dataset.outputText=text;
+      const box=ensureAgentResult(node);box.hidden=false;box.classList.remove('error');box.textContent=text;node.dataset.outputText=text;
       node.dataset.agentTaskId=result.taskId||node.dataset.agentTaskId||'';
       node.dataset.agentRequestId=result.requestId||task.billingRequestId;
       node.dataset.agentRecoveryState='done';
@@ -2866,6 +2919,8 @@ splitGrid=async function(n){
     }catch(error){
       if(error?.name==='AbortError'||task.status==='canceled')return;
       task.status='error';task.phase='failed';task.errorReason=error?.message||'Agent 调用失败';task.note=task.errorReason;task.finishedAt=Date.now();task.durationMs=task.finishedAt-started;
+      const box=ensureAgentResult(node);box.hidden=false;box.classList.add('error');box.textContent='Agent 运行失败：'+task.errorReason+'\n失败不会扣除积分，已冻结的积分会自动返还。';
+      node.dataset.agentLastError=task.errorReason;node.dataset.agentRecoveryState='error';
       setNodeStatus(node,'error','失败');note('Agent：'+task.errorReason);
     }finally{controllers.delete(task.id);window.KAI_WALLET?.refresh()}
   }
