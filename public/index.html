@@ -2662,7 +2662,7 @@ splitGrid=async function(n){
     const requestId=node?.dataset?.agentRequestId||'';
     if(!requestId||String(node.dataset.outputText||'').trim()||recoveringAgentNodes.has(node))return false;
     recoveringAgentNodes.add(node);
-    const deadline=Date.now()+(wait?4*60*1000:1);
+    const deadline=Date.now()+(wait?13*60*1000:1);
     let lastError='';
     try{
       do{
@@ -2905,19 +2905,56 @@ splitGrid=async function(n){
           images:compactedImages.filter(Boolean)
         }
       });
-      const text=String(result.text||'').trim();if(!text)throw new Error('Agent 没有返回文字');
-      const box=ensureAgentResult(node);box.hidden=false;box.classList.remove('error');box.textContent=text;node.dataset.outputText=text;
       node.dataset.agentTaskId=result.taskId||node.dataset.agentTaskId||'';
       node.dataset.agentRequestId=result.requestId||task.billingRequestId;
-      node.dataset.agentRecoveryState='done';
-      node.dataset.agentModel=result.model||task.model;node.dataset.agentUpdatedAt=String(Date.now());
-      pushAgentTextToConnectedNodes(node,text);
       window.KAI_WALLET?.apply(result.wallet);
-      const charged=Number(result.quote?.total||0);const chargedText=charged?(' · 扣除 '+charged+' 积分（¥'+Number(result.quote?.totalRmb||charged*.01).toFixed(2)+'）'):'';
+      let finalResult=result;
+      let text=String(result.text||'').trim();
+      if(!text&&result.accepted){
+        task.phase='generating';task.note='后台处理中，可安全刷新页面';setNodeStatus(node,'running','后台处理中');renderTaskQueue();
+        const deadline=Date.now()+13*60*1000;
+        let lastPollError='';
+        while(Date.now()<deadline){
+          if(controller.signal.aborted)throw new DOMException('已取消','AbortError');
+          await new Promise(resolve=>setTimeout(resolve,3000));
+          try{
+            const status=await agentFetch('/api/agent/status?requestId='+encodeURIComponent(node.dataset.agentRequestId),{timeoutMs:15000});
+            window.KAI_WALLET?.apply(status.wallet);
+            const item=status.task||{};
+            if(item.state==='charged'&&String(item.text||'').trim()){
+              finalResult={...result,...item,text:item.text,quote:item.quote||result.quote,wallet:status.wallet};
+              text=String(item.text).trim();break;
+            }
+            if(item.state==='released')throw new Error(item.error||'Agent 调用失败，冻结积分已返还');
+            lastPollError='';
+            task.note='后台处理中，可安全刷新页面';setNodeStatus(node,'running','后台处理中');renderTaskQueue();
+          }catch(error){
+            if(error?.name==='AbortError')throw error;
+            if(/冻结积分已返还|调用失败|上游处理超时/i.test(error?.message||''))throw error;
+            lastPollError=error?.message||'暂时无法读取任务状态';
+          }
+        }
+        if(!text){
+          const error=new Error((lastPollError?lastPollError+'；':'')+'后台仍在处理，请稍后点击“找回结果”');
+          error.agentPending=true;throw error;
+        }
+      }
+      if(!text)throw new Error('Agent 没有返回文字');
+      const box=ensureAgentResult(node);box.hidden=false;box.classList.remove('error');box.textContent=text;node.dataset.outputText=text;
+      node.dataset.agentRecoveryState='done';
+      node.dataset.agentModel=finalResult.model||task.model;node.dataset.agentUpdatedAt=String(Date.now());
+      pushAgentTextToConnectedNodes(node,text);
+      window.KAI_WALLET?.apply(finalResult.wallet);
+      const charged=Number(finalResult.quote?.total||0);const chargedText=charged?(' · 扣除 '+charged+' 积分（¥'+Number(finalResult.quote?.totalRmb||charged*.01).toFixed(2)+'）'):'';
       task.status='done';task.phase='success';task.note='对话完成'+chargedText;task.finishedAt=Date.now();task.durationMs=task.finishedAt-started;
       setNodeStatus(node,'done','已完成');note('Agent 已返回真实模型结果'+chargedText);
     }catch(error){
       if(error?.name==='AbortError'||task.status==='canceled')return;
+      if(error?.agentPending){
+        task.status='done';task.phase='pending';task.note=error.message;task.finishedAt=Date.now();task.durationMs=task.finishedAt-started;
+        const box=ensureAgentResult(node);box.hidden=false;box.classList.remove('error');box.textContent='Agent 已在后台继续处理。\n可以刷新或关闭页面，稍后点击右下角“找回结果”。';
+        node.dataset.agentRecoveryState='pending';setNodeStatus(node,'running','后台处理中');note(error.message);return;
+      }
       task.status='error';task.phase='failed';task.errorReason=error?.message||'Agent 调用失败';task.note=task.errorReason;task.finishedAt=Date.now();task.durationMs=task.finishedAt-started;
       const box=ensureAgentResult(node);box.hidden=false;box.classList.add('error');box.textContent='Agent 运行失败：'+task.errorReason+'\n失败不会扣除积分，已冻结的积分会自动返还。';
       node.dataset.agentLastError=task.errorReason;node.dataset.agentRecoveryState='error';

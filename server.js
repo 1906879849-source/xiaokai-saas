@@ -261,28 +261,53 @@ app.post('/api/agent/run', async (req, res) => {
           wallet: wallet.publicWallet(),
         });
       }
+      if (prior?.state === 'reserved') {
+        return res.status(202).json({
+          ok: true, accepted: true, recovered: true, provider: 'otterl',
+          taskId: prior.taskId, requestId,
+          model: prior.agentModel || model,
+          state: 'processing',
+          wallet: wallet.publicWallet(),
+        });
+      }
       return res.status(409).json({ ok: false, error: '这个 Agent 请求已经提交，请勿重复点击', wallet: wallet.publicWallet() });
     }
     reservationId = held.reservation.id;
     billingTaskId = `agent-${crypto.randomUUID()}`;
     wallet.attachTasks(reservationId, [{ taskId: billingTaskId, taskApi: 'agent', model: `Agent · ${model}` }]);
 
-    const imageUrls = await otterlChat.prepareImageUrls(rawImages);
-    const result = await otterlChat.runAgent({
+    // 立即把任务编号交给浏览器，耗时的上游调用在后台继续。
+    // 即使页面刷新、网络断开，仍可用 requestId 查询并找回结果。
+    const userId = req.user.id;
+    const agentInput = {
       model,
       metaPrompt: String(body.metaPrompt || '').trim(),
       userNeed: String(body.userNeed || '').trim(),
       skillName: String(body.skillName || '').trim(),
       skillContent: String(body.skillContent || '').trim(),
       contextTexts: Array.isArray(body.contextTexts) ? body.contextTexts.slice(0, 30) : [],
-      imageUrls,
+      rawImages,
+    };
+    setImmediate(() => wallet.runAs(userId, async () => {
+      try {
+        const imageUrls = await otterlChat.prepareImageUrls(agentInput.rawImages);
+        const result = await otterlChat.runAgent({ ...agentInput, imageUrls });
+        const actualQuote = agentPricing.quoteFromUsage(model, result.usage);
+        wallet.settleVariableTask(billingTaskId, true, actualQuote.total, {
+          providerCredits: result.providerCredits, usage: result.usage, quote: actualQuote, kind: 'agent',
+          resultText: result.text, agentModel: model, providerModel: result.providerModel,
+        });
+      } catch (error) {
+        wallet.settleVariableTask(billingTaskId, false, 0, { kind: 'agent', error: error?.message || 'Agent 调用失败' });
+        console.warn('[agent background]', userId, billingTaskId, error?.message || error);
+      }
+    }));
+
+    res.status(202).json({
+      ok: true, accepted: true, provider: 'otterl',
+      taskId: billingTaskId, requestId, model, state: 'processing',
+      quote: price, wallet: wallet.publicWallet(),
     });
-    const actualQuote = agentPricing.quoteFromUsage(model, result.usage);
-    wallet.settleVariableTask(billingTaskId, true, actualQuote.total, {
-      providerCredits: result.providerCredits, usage: result.usage, quote: actualQuote, kind: 'agent',
-      resultText: result.text, agentModel: model, providerModel: result.providerModel,
-    });
-    res.json({ ok: true, provider: 'otterl', taskId: billingTaskId, requestId, model, ...result, quote: actualQuote, wallet: wallet.publicWallet() });
   } catch (error) {
     if (billingTaskId) wallet.settleVariableTask(billingTaskId, false, 0, { kind: 'agent', error: error?.message || 'Agent 调用失败' });
     else if (reservationId) wallet.releaseUnattached(reservationId, 'Agent 调用失败返还');

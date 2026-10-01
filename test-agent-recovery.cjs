@@ -15,11 +15,18 @@ const fakeProvider = http.createServer((req, res) => {
   req.on('end', () => {
     const payload = JSON.parse(body || '{}');
     assert.ok(payload.model);
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({
-      choices: [{ message: { content: '模拟的 Agent 持久化回答' } }],
-      usage: { input_tokens: 120, output_tokens: 40 },
-    }));
+    setTimeout(() => {
+      res.setHeader('Content-Type', 'application/json');
+      if (body.includes('FORCE_FAIL')) {
+        res.statusCode = 502;
+        res.end(JSON.stringify({ error: { message: '模拟上游失败' } }));
+        return;
+      }
+      res.end(JSON.stringify({
+        choices: [{ message: { content: '模拟的 Agent 持久化回答' } }],
+        usage: { input_tokens: 120, output_tokens: 40 },
+      }));
+    }, 250);
   });
 });
 
@@ -65,14 +72,20 @@ const waitForApp = async () => {
       headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': requestId },
       body: JSON.stringify({ model: 'GPT 5.5 Compact · Instant', userNeed: '测试持久化回答' }),
     });
-    const first = await run.json();
-    assert.equal(run.status, 200);
-    assert.equal(first.text, '模拟的 Agent 持久化回答');
-    const chargedBalance = first.wallet.balance;
-    const status = await fetch(`http://127.0.0.1:${appPort}/api/agent/status?requestId=${requestId}`, { headers: { Cookie: cookie } });
-    const saved = await status.json();
+    const accepted = await run.json();
+    assert.equal(run.status, 202);
+    assert.equal(accepted.accepted, true);
+    assert.ok(accepted.taskId);
+    let saved;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const status = await fetch(`http://127.0.0.1:${appPort}/api/agent/status?requestId=${requestId}`, { headers: { Cookie: cookie } });
+      saved = await status.json();
+      if (saved.task?.state !== 'reserved') break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
     assert.equal(saved.task.state, 'charged');
     assert.equal(saved.task.text, '模拟的 Agent 持久化回答');
+    const chargedBalance = saved.wallet.balance;
     const duplicate = await fetch(`http://127.0.0.1:${appPort}/api/agent/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': requestId },
@@ -83,7 +96,26 @@ const waitForApp = async () => {
     assert.equal(recovered.recovered, true);
     assert.equal(recovered.text, '模拟的 Agent 持久化回答');
     assert.equal(recovered.wallet.balance, chargedBalance);
-    console.log('PASS: Agent response persisted, recovered after refresh, and was not charged twice.');
+
+    const failedRequestId = 'agent-background-failure-request';
+    const failedRun = await fetch(`http://127.0.0.1:${appPort}/api/agent/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': failedRequestId },
+      body: JSON.stringify({ model: 'GPT 5.5 Compact · Instant', userNeed: 'FORCE_FAIL' }),
+    });
+    assert.equal(failedRun.status, 202);
+    let failedSaved;
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const status = await fetch(`http://127.0.0.1:${appPort}/api/agent/status?requestId=${failedRequestId}`, { headers: { Cookie: cookie } });
+      failedSaved = await status.json();
+      if (failedSaved.task?.state !== 'reserved') break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.equal(failedSaved.task.state, 'released');
+    assert.match(failedSaved.task.error, /模拟上游失败/);
+    assert.equal(failedSaved.wallet.balance, chargedBalance);
+    assert.equal(failedSaved.wallet.reserved, 0);
+    console.log('PASS: Agent runs in background, persists after refresh, and is not charged twice.');
   } finally {
     if (child && !child.killed) child.kill();
     await close(fakeProvider).catch(() => {});

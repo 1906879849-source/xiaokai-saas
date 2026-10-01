@@ -94,7 +94,13 @@ async function runAgent(options) {
     ...(options.imageUrls || []).slice(0, 10).map(url => ({ type: 'image_url', image_url: { url } })),
   ];
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 210000);
+  // Agent 携带多张参考图和较长 Skill 时，上游可能需要数分钟。
+  // 这里允许后台继续完成；浏览器端通过任务状态轮询，不再占着一次长 HTTP 请求。
+  const configuredTimeout = Number(process.env.AGENT_PROVIDER_TIMEOUT_MS);
+  const timeoutMs = Number.isFinite(configuredTimeout)
+    ? Math.max(60_000, Math.min(30 * 60_000, configuredTimeout))
+    : 12 * 60_000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let data;
   try {
     const response = await fetch(`${API_BASE()}/chat/completions`, {
@@ -122,6 +128,13 @@ async function runAgent(options) {
       error.payload = data;
       throw error;
     }
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      const timeoutError = new Error('Agent 上游处理超时，冻结积分已返还，请减少参考图后重试');
+      timeoutError.statusCode = 504;
+      throw timeoutError;
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
