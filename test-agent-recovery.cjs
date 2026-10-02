@@ -8,12 +8,14 @@ const { spawn } = require('node:child_process');
 const testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kai-agent-recovery-'));
 const appPort = 43991;
 const providerPort = 43992;
+let lastProviderPayload = null;
 const fakeProvider = http.createServer((req, res) => {
   if (req.method !== 'POST' || req.url !== '/v1/chat/completions') { res.writeHead(404).end(); return; }
   let body = '';
   req.on('data', chunk => { body += chunk; });
   req.on('end', () => {
     const payload = JSON.parse(body || '{}');
+    lastProviderPayload = payload;
     assert.ok(payload.model);
     setTimeout(() => {
       res.setHeader('Content-Type', 'application/json');
@@ -70,7 +72,13 @@ const waitForApp = async () => {
     const run = await fetch(`http://127.0.0.1:${appPort}/api/agent/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': requestId },
-      body: JSON.stringify({ model: 'GPT 5.5 Compact · Instant', userNeed: '测试持久化回答' }),
+      body: JSON.stringify({
+        model: 'GPT 5.5 Compact · Instant',
+        metaPrompt: '按完整结构输出',
+        userNeed: '测试持久化回答',
+        skillName: '测试 SKILL.md',
+        skillContent: '# 测试 Skill\n必须输出完整分析、执行步骤和最终文案。',
+      }),
     });
     const accepted = await run.json();
     assert.equal(run.status, 202);
@@ -85,6 +93,11 @@ const waitForApp = async () => {
     }
     assert.equal(saved.task.state, 'charged');
     assert.equal(saved.task.text, '模拟的 Agent 持久化回答');
+    assert.equal(lastProviderPayload.max_tokens, 8192);
+    const sentMessages = JSON.stringify(lastProviderPayload.messages || []);
+    assert.match(sentMessages, /测试 Skill/);
+    assert.match(sentMessages, /不得只复述规则/);
+    assert.match(sentMessages, /均为已授权的成年模特商业素材/);
     const chargedBalance = saved.wallet.balance;
     const duplicate = await fetch(`http://127.0.0.1:${appPort}/api/agent/run`, {
       method: 'POST',

@@ -764,7 +764,24 @@
   function addQuickFitButton(n){if(!n?.querySelector('.uploaded-image'))return;let button=n.querySelector('.quick-fit');if(!button){button=document.createElement('button');button.className='quick-fit';button.type='button';button.title='恢复原图比例';button.setAttribute('aria-label','恢复原图比例');n.querySelector('.card')?.appendChild(button)}button.onclick=e=>{e.stopPropagation();restoreImageAspect(n)}}
   function createImageNode(src,name,x,y,record=true){const article=document.createElement('article'),card=document.createElement('div'),img=document.createElement('img'),label=document.createElement('div');article.className='node uploaded-image-node';article.id='upload-'+Date.now()+'-'+Math.random().toString(16).slice(2);article.style.left=x+'px';article.style.top=y+'px';article.innerHTML=imageActions;label.className='node-label';label.textContent='▧　'+name;card.className='card';img.className='uploaded-image';img.alt=name;img.src=src;img.onload=()=>{card.classList.toggle('landscape',img.naturalWidth/img.naturalHeight>1.15);syncNodeChrome(article);wires()};card.appendChild(img);article.append(label,card);const plus=document.createElement('button');plus.className='plus';plus.textContent='+';article.appendChild(plus);world.appendChild(article);nodes.push(article);bindNode(article);addQuickReplaceButton(article);if(record)commitHistory({undo:()=>article.remove(),redo:()=>{world.appendChild(article);bindNode(article)}});return article}
   function createGenerationNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom){const article=document.createElement('article'),count=document.querySelectorAll('.generation-node').length+1;article.className='node generation-node';article.id='generation-'+Date.now()+'-'+Math.random().toString(16).slice(2);article.style.left=x+'px';article.style.top=y+'px';article.innerHTML=imageActions+'<div class="node-label">▧　图片 '+count+'</div><div class="card generation-card"><div class="generation-empty"><span>▧</span><small>生成结果将在这里显示</small></div></div><button class="plus">+</button>';world.appendChild(article);nodes.push(article);bindNode(article);selectNode(article);document.getElementById('modeButton').textContent='生图 ▾';promptBox.placeholder='上传参考图、输入文字或 @ 主体，描述你想生成的图片……';promptBox.focus();ripple((article.offsetLeft*zoom+panX)+article.offsetWidth*zoom/2,(article.offsetTop*zoom+panY)+article.offsetHeight*zoom/2);commitHistory({undo:()=>{article.remove();dock.classList.remove('open')},redo:()=>{world.appendChild(article);selectNode(article)}});return article}
-  function bindAgentNode(article){const skill=article.querySelector('.agent-skill'),file=article.querySelector('.agent-skill-file');if(skill&&file){readSkills().then(list=>list.forEach(item=>{if(![...skill.options].some(o=>o.text===item.name))skill.add(new Option(item.name,item.name))}));skill.onchange=()=>{if(skill.value==='加载 Skill 文件…')file.click();scheduleSave()};file.onchange=()=>{if(file.files[0]){addSkills([...file.files]);if(![...skill.options].some(o=>o.text===file.files[0].name))skill.add(new Option(file.files[0].name,file.files[0].name));skill.value=file.files[0].name;note('Skill 已加载到 Agent 节点');scheduleSave()}}}const areas=[...article.querySelectorAll('textarea')],runButton=article.querySelector('.agent-run');areas.forEach(t=>{bindFieldHistory(t);t.addEventListener('input',()=>{runButton?.classList.toggle('ready',areas.some(a=>a.value.trim()));scheduleSave()})});article.querySelectorAll('select').forEach(s=>{bindFieldHistory(s);s.addEventListener('change',scheduleSave)});if(runButton)runButton.onclick=e=>{e.stopPropagation();note('Agent 节点已就绪，配置模型 API 后即可运行')}}
+  function bindAgentNode(article){
+    const skill=article.querySelector('.agent-skill'),file=article.querySelector('.agent-skill-file');
+    if(skill&&file){
+      readSkills().then(list=>list.forEach(item=>{if(![...skill.options].some(o=>o.text===item.name))skill.add(new Option(item.name,item.name))}));
+      skill.onchange=()=>{if(skill.value==='加载 Skill 文件…')file.click();scheduleSave()};
+      file.onchange=async()=>{
+        const selected=file.files[0];if(!selected)return;
+        await addSkills([selected]);
+        if(![...skill.options].some(o=>o.text===selected.name))skill.add(new Option(selected.name,selected.name));
+        skill.value=selected.name;article.dataset.skillName=selected.name;
+        note('Skill 完整内容已加载到 Agent 节点');scheduleSave();file.value='';
+      }
+    }
+    const areas=[...article.querySelectorAll('textarea')],runButton=article.querySelector('.agent-run');
+    areas.forEach(t=>{bindFieldHistory(t);t.addEventListener('input',()=>{runButton?.classList.toggle('ready',areas.some(a=>a.value.trim()));scheduleSave()})});
+    article.querySelectorAll('select').forEach(s=>{bindFieldHistory(s);s.addEventListener('change',scheduleSave)});
+    if(runButton)runButton.onclick=e=>{e.stopPropagation();note('Agent 节点已就绪，配置模型 API 后即可运行')}
+  }
   function createAgentNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom){const article=document.createElement('article');article.className='node agent-node';article.id='agent-'+Date.now();article.style.left=x+'px';article.style.top=y+'px';article.innerHTML='<div class="node-label">✦　自定义代理</div><div class="card agent-card"><div class="agent-node-head"><b>Agent 工作流</b><select class="agent-model"><option>GPT 5.5 Compact · Instant</option><option>GPT 5.5 · Thinking</option><option>GPT 5.6 SOL · Pro</option><option>Gemini 3.1 Flash Lite</option><option>Gemini 3 Flash Thinking</option><option>Gemini 3.1 Pro High</option></select><select class="agent-skill"><option>无 Skill</option><option>加载 Skill 文件…</option></select><input class="agent-skill-file" type="file" accept=".md,.zip" hidden></div><div class="agent-fields"><div class="agent-field"><label>元提示词</label><textarea placeholder="设定身份、风格和工作规则……"></textarea></div><div class="agent-field"><label>用户需求</label><textarea placeholder="输入任务，或通过连线、@ 引用图片……"></textarea></div><div class="agent-output"><label>输出内容</label><select><option>输出文字</option><option>生成图片</option><option>生成视频</option></select></div></div><button class="agent-run">运行 Agent</button></div><button class="plus">+</button>';world.appendChild(article);nodes.push(article);bindNode(article);bindAgentNode(article);selectNode(article);commitHistory({undo:()=>article.remove(),redo:()=>{world.appendChild(article);selectNode(article)}});return article}
   function createTextNode(kind='text',x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom,value='',record=true){const n=document.createElement('article');n.className='node '+(kind==='note'?'note-node':'text-node');n.id=kind+'-'+Date.now()+'-'+Math.random().toString(16).slice(2);n.style.left=x+'px';n.style.top=y+'px';n.innerHTML='<div class="node-label">'+(kind==='note'?'▤　便签':'T　文字')+'</div><div class="card text-card"><textarea placeholder="'+(kind==='note'?'记录想法……':'输入或粘贴文字')+'"></textarea></div><button class="plus">+</button>';n.querySelector('textarea').value=value;world.appendChild(n);nodes.push(n);bindNode(n);n.querySelector('textarea').oninput=scheduleSave;selectNode(n);if(record)commitHistory({undo:()=>n.remove(),redo:()=>world.appendChild(n)});return n}
   function createGroupNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom,width=560,height=390){const n=document.createElement('article');n.className='node group-node';n.id='group-'+Date.now();n.style.left=x+'px';n.style.top=y+'px';n.innerHTML='<div class="node-label">⌗　节点组</div><div class="card group-card"></div><button class="plus">+</button>';const card=n.querySelector('.group-card');card.style.width=width+'px';card.style.height=height+'px';world.appendChild(n);nodes.unshift(n);bindNode(n);selectNode(n);commitHistory({undo:()=>n.remove(),redo:()=>world.appendChild(n)});return n}
@@ -2641,7 +2658,8 @@ splitGrid=async function(n){
     node.dataset.agentRecoveryState='done';
     const modelSelect=node.querySelector('.agent-model');
     if(modelSelect&&[...modelSelect.options].some(option=>option.value===item.model))modelSelect.value=item.model;
-    [...document.querySelectorAll('.wire path[data-a][data-b]')]
+    if(window.KAI_AGENT_TEXT_RUNTIME?.deliver)window.KAI_AGENT_TEXT_RUNTIME.deliver(node,text,{create:true});
+    else [...document.querySelectorAll('.wire path[data-a][data-b]')]
       .filter(path=>path.dataset.a===node.id)
       .map(path=>document.getElementById(path.dataset.b)).filter(Boolean)
       .forEach(target=>{const field=target.matches('.text-node,.note-node')?target.querySelector('textarea'):null;if(field){field.value=text;field.dispatchEvent(new Event('input',{bubbles:true}));target.dataset.outputText=text}});
@@ -2854,16 +2872,51 @@ splitGrid=async function(n){
     return{name:item.name,content:item.content||''};
   }
 
-  function pushAgentTextToConnectedNodes(agentNode,text){
-    const targets=[...document.querySelectorAll('.wire path[data-a][data-b]')]
+  function deliverAgentText(agentNode,text,{create=true}={}){
+    const value=String(text||'').trim();if(!agentNode?.isConnected||!value)return[];
+    let targets=[...document.querySelectorAll('.wire path[data-a][data-b]')]
       .filter(path=>path.dataset.a===agentNode.id)
-      .map(path=>document.getElementById(path.dataset.b)).filter(Boolean);
+      .map(path=>document.getElementById(path.dataset.b))
+      .filter(target=>target?.matches('.text-node,.note-node'));
+    if(!targets.length&&create){
+      let target=[...document.querySelectorAll('.text-node,.note-node')].find(node=>node.dataset.agentOutputFor===agentNode.id);
+      if(!target){
+        const previous=selectedNode;
+        target=createTextNode('text',agentNode.offsetLeft+agentNode.offsetWidth+170,agentNode.offsetTop+70,'',true);
+        target.dataset.agentOutputFor=agentNode.id;
+        const label=target.querySelector('.node-label');if(label)label.textContent='T　Agent 完整文案';
+        const card=target.querySelector('.text-card');if(card){card.style.width='460px';card.style.height='420px'}
+        createStableWire(agentNode,target);
+        if(previous?.isConnected)selectNode(previous,false,true);
+      }else if(![...document.querySelectorAll('.wire path[data-a][data-b]')].some(path=>path.dataset.a===agentNode.id&&path.dataset.b===target.id)){
+        createStableWire(agentNode,target);
+      }
+      targets=[target];
+    }
     targets.forEach(target=>{
-      const textarea=target.matches('.text-node,.note-node')?target.querySelector('textarea'):null;
-      if(textarea){textarea.value=text;textarea.dispatchEvent(new Event('input',{bubbles:true}));target.dataset.outputText=text}
+      target.dataset.agentOutputFor=agentNode.id;target.dataset.outputText=value;
+      const textarea=target.querySelector('textarea');
+      if(textarea){textarea.value=value;textarea.dispatchEvent(new Event('input',{bubbles:true}));textarea.scrollTop=0}
     });
-    pushAgentOutputDownstream(agentNode,text);
+    if(targets.length){wires();scheduleSave()}
+    return targets;
   }
+
+  function pushAgentTextToConnectedNodes(agentNode,text){
+    const targets=deliverAgentText(agentNode,text,{create:true});
+    pushAgentOutputDownstream(agentNode,text);
+    if(targets.length)note('Agent 完整文案已写入下游文本节点');
+  }
+
+  window.KAI_AGENT_TEXT_RUNTIME={deliver:deliverAgentText};
+  const agentWireObserver=new MutationObserver(changes=>{
+    changes.flatMap(change=>[...change.addedNodes]).filter(node=>node?.matches?.('path[data-a][data-b]')).forEach(path=>{
+      const source=document.getElementById(path.dataset.a),target=document.getElementById(path.dataset.b);
+      const text=String(source?.dataset?.outputText||'').trim();
+      if(source?.classList.contains('agent-node')&&target?.matches('.text-node,.note-node')&&text)deliverAgentText(source,text,{create:false});
+    });
+  });
+  agentWireObserver.observe(document.querySelector('.wire'),{childList:true});
 
   async function compactAgentImage(source){
     const value=String(source||'');
@@ -3193,7 +3246,8 @@ splitGrid=async function(n){
     .sketch-card{width:420px;height:315px;min-width:220px;min-height:180px;background:#fff;border-color:#4a4d54;overflow:hidden}
     .sketch-card .sketch-preview{z-index:1;object-fit:fill;background:#fff}
     .sketch-canvas{position:absolute;inset:0;z-index:2;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none;background:transparent}
-    .sketch-controls{position:absolute;left:0;top:calc(100% + 9px);z-index:18;display:flex;align-items:center;gap:6px;min-height:38px;padding:6px 8px;border:1px solid #3a3d44;border-radius:11px;background:rgba(31,33,38,.97);box-shadow:0 12px 30px rgba(0,0,0,.34);white-space:nowrap}
+    .sketch-controls{position:absolute;left:0;top:calc(100% + 9px);z-index:18;display:none;align-items:center;gap:6px;min-height:38px;padding:6px 8px;border:1px solid #3a3d44;border-radius:11px;background:rgba(31,33,38,.97);box-shadow:0 12px 30px rgba(0,0,0,.34);white-space:nowrap}
+    .sketch-node .sketch-card.selected + .sketch-controls{display:flex}
     .sketch-controls button,.sketch-controls select{height:28px;border:1px solid #484c55;border-radius:7px;background:#292c32;color:#e8ebf0;cursor:pointer}
     .sketch-controls button{min-width:29px;padding:0 8px}
     .sketch-controls button:hover,.sketch-controls button.on{border-color:#88b8ff;background:#354157;color:#fff}
@@ -3341,6 +3395,18 @@ splitGrid=async function(n){
   const observer=new MutationObserver(()=>document.querySelectorAll('.sketch-node').forEach(bindSketchNode));
   observer.observe(world,{childList:true,subtree:true});
   document.querySelectorAll('.sketch-node').forEach(bindSketchNode);
+
+  // Reuse the canvas-wide undo shortcuts. When a sketch is selected they undo
+  // or redo brush strokes; otherwise the existing project history keeps control.
+  document.addEventListener('keydown',event=>{
+    const modifier=event.ctrlKey||event.metaKey,key=event.key.toLowerCase();
+    if(!modifier||!['z','y'].includes(key)||event.target?.closest?.('textarea,[contenteditable="true"]'))return;
+    const node=selectedNode?.classList?.contains('sketch-node')?selectedNode:document.querySelector('.sketch-node .sketch-card.selected')?.closest('.sketch-node');
+    if(!node)return;
+    event.preventDefault();event.stopImmediatePropagation();
+    const redo=key==='y'||(key==='z'&&event.shiftKey);
+    node.querySelector(redo?'.sketch-redo':'.sketch-undo')?.click();
+  },true);
 })();
 </script>
 </body></html>
