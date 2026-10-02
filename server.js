@@ -101,8 +101,10 @@ async function cacheRemoteResults(taskId, urls) {
       local.push(url);
       continue;
     }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
       if (!response.ok) throw new Error(`下载生成图失败：HTTP ${response.status}`);
       const buffer = Buffer.from(await response.arrayBuffer());
       const ext = extFromContentType(response.headers.get('content-type') || '');
@@ -113,6 +115,8 @@ async function cacheRemoteResults(taskId, urls) {
     } catch (error) {
       // 如果缓存失败，仍返回 Kie 原始 URL，避免丢掉已经生成成功的结果。
       local.push(url);
+    } finally {
+      clearTimeout(timeout);
     }
   }
   cachedTaskUrls.set(taskId, local);
@@ -476,12 +480,12 @@ app.get('/api/task/:taskId', async (req, res) => {
     const taskApi = req.query.api === 'mock' ? 'mock' : req.query.api === 'gpt4o' ? 'gpt4o' : req.query.api === 'otterl' ? 'otterl' : 'market';
     const selectedProvider = providerFromTaskApi(taskApi);
     const task = await selectedProvider.client.getTask(req.params.taskId, taskApi);
-    if (task.state === 'success') wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed });
-    if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
     let urls = task.resultUrls;
     if (task.state === 'success' && urls.length) {
       urls = await cacheRemoteResults(task.taskId, urls);
     }
+    if (task.state === 'success') wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
+    if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
     const base = `${req.protocol}://${req.get('host')}`;
     const absoluteUrls = urls.map(url => url.startsWith('/') ? `${base}${url}` : url);
     res.json({
@@ -504,7 +508,12 @@ app.get('/api/task/:taskId', async (req, res) => {
 });
 
 app.get('/api/tasks/recent', (req, res) => {
-  res.json({ ok: true, tasks: wallet.recentTasks(req.query.limit) });
+  const base = `${req.protocol}://${req.get('host')}`;
+  const tasks = wallet.recentTasks(req.query.limit).map(item => ({
+    ...item,
+    resultUrls: (Array.isArray(item.resultUrls) ? item.resultUrls : []).map(url => String(url).startsWith('/') ? `${base}${url}` : url),
+  }));
+  res.json({ ok: true, tasks });
 });
 
 let reconcilingWallet = false;
@@ -521,7 +530,10 @@ async function reconcileWalletTasks() {
         try {
           const selectedProvider = providerFromTaskApi(item.taskApi || 'market');
           const task = await selectedProvider.client.getTask(item.taskId, item.taskApi || 'market');
-          if (task.state === 'success') wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed });
+          if (task.state === 'success') {
+            const urls = task.resultUrls?.length ? await cacheRemoteResults(task.taskId, task.resultUrls) : [];
+            wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
+          }
           if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
         } catch (error) {
           console.warn('[wallet reconcile]', userId, item.taskId, error.message);

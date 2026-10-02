@@ -540,7 +540,7 @@
               <button><span class="ratio-icon port"></span><span>3:4</span></button><button><span class="ratio-icon wide"></span><span>3:2</span></button><button><span class="ratio-icon port"></span><span>2:3</span></button><button><span class="ratio-icon land"></span><span>5:4</span></button><button><span class="ratio-icon port"></span><span>4:5</span></button>
               <button><span class="ratio-icon wide"></span><span>21:9</span></button><button><span class="ratio-icon auto"></span><span>自定义</span></button>
             </div>
-            <div class="option-label">画质</div><div class="resolution-grid"><button class="on" data-value="standard">标准</button><button data-value="high">高质量</button><button data-value="4K" hidden>4K</button></div>
+            <div class="option-label">分辨率</div><div class="resolution-grid"><button class="on" data-value="1K">1K</button><button data-value="2K" hidden>2K</button><button data-value="4K" hidden>4K</button></div>
             <div class="option-label">生成数量</div><div class="count-grid"><button class="on">1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button></div>
           </div>
         </div>
@@ -987,8 +987,27 @@
   document.querySelectorAll('.context-menu button').forEach(b=>b.onclick=()=>{menu.classList.remove('open');const action=b.dataset.action,x=(lastMenuX-panX)/zoom,y=(lastMenuY-panY)/zoom;if(action==='Agent 对话')return createAgentNode(x,y);if(action==='生图')return createGenerationNode(x,y);ripple(lastMenuX,lastMenuY);if(action==='文字')return createTextNode('text',x,y);if(action==='分组')return createGroupNode(x,y);if(action==='取消分组')return ungroupNode();if(action==='图片对比')return createCompareNode(x,y);if(action==='替换图片'){if(!contextNode?.querySelector('.card'))return note('请先右键一张图片');replacingNode=contextNode;document.getElementById('replaceImageUpload').click();return}document.getElementById('modeButton').textContent=action+' ▾';if(action==='视频'&&contextNode?.querySelector('.video-art')){selectNode(contextNode);note('已打开视频内容框');return}note('请先选择一个视频节点')});
   document.querySelectorAll('[data-edge-action]').forEach(b=>b.onclick=()=>{const action=b.dataset.edgeAction,path=selectedEdge;if(!path)return;if(action==='delete')return deleteEdge(path);if(action==='earlier'||action==='later'){const svg=document.querySelector('.wire'),before=[...svg.querySelectorAll('path[data-a][data-b]')],same=before.filter(p=>p.dataset.b===path.dataset.b),i=same.indexOf(path),swap=action==='earlier'?same[i-1]:same[i+1];if(!swap)return note('已经位于当前顺序边界');if(action==='earlier')svg.insertBefore(path,swap);else svg.insertBefore(swap,path);const after=[...svg.querySelectorAll('path[data-a][data-b]')],applyOrder=list=>{list.forEach(p=>svg.appendChild(p));wires()};commitHistory({undo:()=>applyOrder(before),redo:()=>applyOrder(after)});wires();scheduleSave();document.getElementById('edgeMenu').classList.remove('open');note('输入顺序已调整');return}const a=document.getElementById(path.dataset.a),z=document.getElementById(path.dataset.b);if(!a||!z)return;const svg=document.querySelector('.wire'),oldNext=path.nextSibling,text=createTextNode('text',(a.offsetLeft+z.offsetLeft)/2,(a.offsetTop+z.offsetTop)/2,'',false),created=[];path.remove();[[a,text],[text,z]].forEach(([from,to])=>{const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.dataset.a=from.id;p.dataset.b=to.id;svg.appendChild(p);bindEdge(p);created.push(p)});commitHistory({undo:()=>{created.forEach(p=>p.remove());text.remove();svg.insertBefore(path,oldNext);bindEdge(path);wires()},redo:()=>{path.remove();world.appendChild(text);created.forEach(p=>{svg.appendChild(p);bindEdge(p)});wires()}});selectedEdge=null;document.getElementById('edgeMenu').classList.remove('open');wires();note('已在连线上插入文字节点')});
   document.getElementById('modelSelect').onclick=e=>{e.stopPropagation();document.getElementById('modelMenu').classList.toggle('open')};
-  const FIXED_4K_IMAGE_MODELS=new Set(['GPT Image 2 · 4K 超分','GPT Image 2 · 原生 4K']);
-  function configureResolutionForModel(model){const buttons=[...document.querySelectorAll('.resolution-grid button')],fixed=FIXED_4K_IMAGE_MODELS.has(model);buttons.forEach(button=>{const is4K=button.dataset.value==='4K';button.hidden=fixed?!is4K:is4K;button.classList.toggle('on',fixed?is4K:(!is4K&&button.classList.contains('on')))});const visible=buttons.filter(button=>!button.hidden);if(!visible.some(button=>button.classList.contains('on'))&&visible[0])visible[0].classList.add('on');const ratio=document.querySelector('.ratio-grid .on')?.textContent.trim()||'自适应',quality=document.querySelector('.resolution-grid .on')?.textContent.trim()||(fixed?'4K':'标准'),count=document.querySelector('.count-grid .on')?.textContent.trim()||'1';document.getElementById('sizeButton').title=ratio+' · '+quality+' · '+count+' 张'}
+  const MODEL_RESOLUTION_OPTIONS={
+    'GPT Image 2':['1K'],
+    'GPT Image 2 · 4K 超分':['4K'],
+    'GPT Image 2 · 原生 4K':['4K'],
+    'GPT Image 2.5 Flare':['1K'],
+    'GPT Image 2.5 Sunburst':['1K'],
+    'Gemini 3 Pro Image':['1K','2K','4K'],
+    'Gemini 3.1 Flash Image':['1K','2K','4K']
+  };
+  function configureResolutionForModel(model){
+    const buttons=[...document.querySelectorAll('.resolution-grid button')];
+    const allowed=MODEL_RESOLUTION_OPTIONS[model]||['1K'];
+    buttons.forEach(button=>button.hidden=!allowed.includes(button.dataset.value));
+    const visible=buttons.filter(button=>!button.hidden);
+    const selected=visible.find(button=>button.classList.contains('on'))||visible[0];
+    buttons.forEach(button=>button.classList.toggle('on',button===selected));
+    const ratio=document.querySelector('.ratio-grid .on')?.textContent.trim()||'自适应';
+    const resolution=selected?.textContent.trim()||allowed[0];
+    const count=document.querySelector('.count-grid .on')?.textContent.trim()||'1';
+    document.getElementById('sizeButton').title=ratio+' · '+resolution+' · '+count+' 张';
+  }
   function applyModelChoice(model){const b=[...document.querySelectorAll('.model-choice')].find(x=>x.dataset.model===model);if(!b)return;document.querySelectorAll('.model-choice').forEach(x=>x.classList.remove('on'));b.classList.add('on');const label=document.getElementById('modelLabel');label.dataset.model=b.dataset.model;label.textContent=b.dataset.display||b.dataset.model;const logo=document.getElementById('modelLogo');logo.textContent=b.dataset.logo;logo.className='mini-model-logo '+b.dataset.class;configureResolutionForModel(b.dataset.model);scheduleSave()}
   document.querySelectorAll('.model-choice').forEach(b=>b.onclick=e=>{e.stopPropagation();const label=document.getElementById('modelLabel'),before=label.dataset.model||label.textContent,after=b.dataset.model;if(before!==after){applyModelChoice(after);commitHistory({undo:()=>applyModelChoice(before),redo:()=>applyModelChoice(after)})}document.getElementById('modelMenu').classList.remove('open');note('已选择 '+(b.dataset.display||b.dataset.model))});
   document.getElementById('sizeButton').onclick=e=>{e.stopPropagation();document.getElementById('sizeMenu').classList.toggle('open')};
@@ -2219,7 +2238,7 @@ splitGrid=async function(n){
   function taskParams(task,node){
     const st=parseState(task.sizeState||node?.dataset.sizeState||'');
     const aspectRatio=optionText('.ratio-grid',st.ratio,'自适应');
-    const resolution=optionText('.resolution-grid',st.resolution,'standard');
+    const resolution=optionText('.resolution-grid',st.resolution,'1K');
     const count=Math.max(1,Math.min(8,Number(optionText('.count-grid',st.count,'1'))||1));
     const background=optionText('.background-grid',st.background,'默认');
     return{aspectRatio,resolution,count,background};
@@ -2769,7 +2788,15 @@ splitGrid=async function(n){
           node.dataset.providerSubmittedAt=String(item.createdAt||Date.now());
           node.dataset.providerRecoveryState='pending';
           claimed.add(item.taskId);
-          recoveries.push(recoverNode(node,tasks,{legacy:true,quiet:true}));
+          const savedUrls=Array.isArray(item.resultUrls)?item.resultUrls.filter(Boolean):[];
+          if(savedUrls.length){
+            try{
+              forceRecoveredImage(node,savedUrls[0],item.prompt||'');
+              node.dataset.providerRecoveryState='done';
+              setNodeStatus(node,'done','已恢复');
+              recoveries.push(Promise.resolve(true));
+            }catch(error){recoveries.push(recoverNode(node,tasks,{legacy:true,quiet:true}))}
+          }else recoveries.push(recoverNode(node,tasks,{legacy:true,quiet:true}));
         });
       }catch(error){
         console.warn('读取后台图片任务失败',error);
@@ -3178,8 +3205,8 @@ splitGrid=async function(n){
     const state=captureSizeState();
     state.background=transparent?1:0;
     state.count=0;
-    const standard=[...document.querySelectorAll('.resolution-grid button')].findIndex(button=>button.dataset.value==='standard');
-    if(standard>=0)state.resolution=standard;
+    const oneK=[...document.querySelectorAll('.resolution-grid button')].findIndex(button=>button.dataset.value==='1K');
+    if(oneK>=0)state.resolution=oneK;
     const image=source?.querySelector('.uploaded-image');
     const ratio=image?.naturalWidth&&image?.naturalHeight?image.naturalWidth/image.naturalHeight:1;
     const choices=[...document.querySelectorAll('.ratio-grid button')];
@@ -3193,7 +3220,7 @@ splitGrid=async function(n){
     });
     state.ratio=best;
     state.text=(choices[best]?.textContent.trim()||'自适应')+' ▴';
-    state.title=(choices[best]?.textContent.trim()||'自适应')+' · 标准 · 1 张';
+    state.title=(choices[best]?.textContent.trim()||'自适应')+' · 1K · 1 张';
     return JSON.stringify(state);
   }
 

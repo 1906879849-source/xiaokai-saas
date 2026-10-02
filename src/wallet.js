@@ -35,6 +35,7 @@ const PRICES = {
   'Agent · Gemini 3 Flash Thinking': { default: agentPricing.estimate('Gemini 3 Flash Thinking').total },
   'Agent · Gemini 3.1 Pro High': { default: agentPricing.estimate('Gemini 3.1 Pro High').total },
   'GPT Image 2': {
+    '1K': intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24),
     standard: intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24),
     high: intEnv('PRICE_GPT_IMAGE_2_HIGH', 24),
     default: intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24),
@@ -42,17 +43,29 @@ const PRICES = {
   'GPT Image 2 · 4K 超分': { default: intEnv('PRICE_GPT_IMAGE_2_4K_UPSCALE', 24) },
   'GPT Image 2 · 原生 4K': { default: intEnv('PRICE_GPT_IMAGE_2_NATIVE_4K', 40) },
   'GPT Image 2.5 Flare': {
+    '1K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24),
     standard: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24),
     high: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_HIGH', 24),
     default: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24),
   },
   'GPT Image 2.5 Sunburst': {
+    '1K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24),
     standard: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24),
     high: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_HIGH', 24),
     default: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24),
   },
-  'Gemini 3 Pro Image': { default: intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80) },
-  'Gemini 3.1 Flash Image': { default: intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60) },
+  'Gemini 3 Pro Image': {
+    '1K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_1K', intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80)),
+    '2K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_2K', intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80)),
+    '4K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_4K', intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80)),
+    default: intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80),
+  },
+  'Gemini 3.1 Flash Image': {
+    '1K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_1K', intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60)),
+    '2K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_2K', intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60)),
+    '4K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_4K', intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60)),
+    default: intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60),
+  },
 };
 
 function currentUserId() { return String(context.getStore()?.userId || 'local').replace(/[^a-zA-Z0-9_-]/g, '_'); }
@@ -139,8 +152,8 @@ function publicWallet() {
 function normalizeResolution(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === '4k') return '4K';
-  if (normalized === 'high' || normalized === '高质量') return 'high';
-  return 'standard';
+  if (normalized === '2k' || normalized === 'high' || normalized === '高质量') return '2K';
+  return '1K';
 }
 
 function quote({ model, resolution, count = 1 }) {
@@ -263,7 +276,20 @@ function releaseUnattached(reservationId, note = '任务创建失败返还') {
 
 function settleTask(taskId, success, detail = {}) {
   const item = store.tasks[taskId];
-  if (!item || item.state !== 'reserved') return publicWallet();
+  if (!item) return publicWallet();
+  let metadataChanged = false;
+  if (success && Array.isArray(detail.resultUrls) && detail.resultUrls.length) {
+    item.resultUrls = detail.resultUrls.map(String).filter(Boolean).slice(0, 8);
+    metadataChanged = true;
+  }
+  if (success && detail.providerModel) {
+    item.providerModel = String(detail.providerModel).slice(0, 160);
+    metadataChanged = true;
+  }
+  if (item.state !== 'reserved') {
+    if (metadataChanged) persist();
+    return publicWallet();
+  }
   store.reserved = Math.max(0, store.reserved - item.price);
   if (success) {
     store.balance = Math.max(0, store.balance - item.price);
