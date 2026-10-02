@@ -3184,5 +3184,163 @@ splitGrid=async function(n){
   };
   document.getElementById('editorApply').onclick=applyEditor;
 })();
+
+/* SKETCH_REFERENCE_NODE_V1 */
+(function(){
+  const style=document.createElement('style');
+  style.textContent=`
+    .sketch-node .node-label{color:#d9dde5}
+    .sketch-card{width:420px;height:315px;min-width:220px;min-height:180px;background:#fff;border-color:#4a4d54;overflow:hidden}
+    .sketch-card .sketch-preview{z-index:1;object-fit:fill;background:#fff}
+    .sketch-canvas{position:absolute;inset:0;z-index:2;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none;background:transparent}
+    .sketch-controls{position:absolute;left:0;top:calc(100% + 9px);z-index:18;display:flex;align-items:center;gap:6px;min-height:38px;padding:6px 8px;border:1px solid #3a3d44;border-radius:11px;background:rgba(31,33,38,.97);box-shadow:0 12px 30px rgba(0,0,0,.34);white-space:nowrap}
+    .sketch-controls button,.sketch-controls select{height:28px;border:1px solid #484c55;border-radius:7px;background:#292c32;color:#e8ebf0;cursor:pointer}
+    .sketch-controls button{min-width:29px;padding:0 8px}
+    .sketch-controls button:hover,.sketch-controls button.on{border-color:#88b8ff;background:#354157;color:#fff}
+    .sketch-controls .sketch-color{width:24px;min-width:24px;height:24px;padding:0;border:2px solid rgba(255,255,255,.48);border-radius:50%;background:var(--swatch)}
+    .sketch-controls .sketch-color.on{outline:2px solid #72a8ff;outline-offset:2px}
+    .sketch-controls .sketch-size{width:72px;accent-color:#79aaff}
+    .sketch-controls .sketch-divider{width:1px;height:22px;background:#444851}
+    .sketch-controls .sketch-ratio{width:58px;padding:0 4px}
+    .sketch-node.collapsed .sketch-controls{display:none}
+  `;
+  document.head.appendChild(style);
+
+  const sketchStates=new WeakMap();
+  const ratioSizes={
+    '1:1':[1024,1024],
+    '4:3':[1024,768],
+    '3:4':[768,1024],
+    '16:9':[1024,576],
+    '9:16':[576,1024]
+  };
+
+  function sketchMarkup(){
+    return '<div class="node-label">✎　手绘参考图</div>'+
+      '<div class="card sketch-card"><img class="uploaded-image sketch-preview" alt="手绘参考草图"><canvas class="sketch-canvas" width="1024" height="768"></canvas></div>'+
+      '<div class="sketch-controls">'+
+        '<button class="sketch-pen on" type="button" title="画笔">✎</button>'+
+        '<button class="sketch-eraser" type="button" title="橡皮擦">⌫</button>'+
+        '<span class="sketch-divider"></span>'+
+        '<button class="sketch-color on" type="button" data-color="#17191d" style="--swatch:#17191d" title="黑色"></button>'+
+        '<button class="sketch-color" type="button" data-color="#ef4444" style="--swatch:#ef4444" title="红色"></button>'+
+        '<button class="sketch-color" type="button" data-color="#22c55e" style="--swatch:#22c55e" title="绿色"></button>'+
+        '<button class="sketch-color" type="button" data-color="#3b82f6" style="--swatch:#3b82f6" title="蓝色"></button>'+
+        '<button class="sketch-color" type="button" data-color="#eab308" style="--swatch:#eab308" title="黄色"></button>'+
+        '<input class="sketch-size" type="range" min="2" max="42" value="10" title="画笔粗细">'+
+        '<select class="sketch-ratio" title="画布比例"><option>4:3</option><option>1:1</option><option>16:9</option><option>9:16</option><option>3:4</option></select>'+
+        '<span class="sketch-divider"></span>'+
+        '<button class="sketch-undo" type="button" title="撤销一笔">↶</button>'+
+        '<button class="sketch-redo" type="button" title="重做一笔">↷</button>'+
+        '<button class="sketch-clear" type="button" title="清空画布">清空</button>'+
+        '<button class="sketch-download" type="button" title="导出 PNG">PNG</button>'+
+      '</div><button class="plus" type="button">+</button>';
+  }
+
+  function updateSketchCardRatio(node,width,height){
+    const card=node.querySelector('.sketch-card');if(!card)return;
+    const ratio=width/Math.max(1,height);
+    let w=420,h=315;
+    if(ratio>=1){w=420;h=w/ratio}else{h=420;w=h*ratio}
+    card.style.width=Math.round(w)+'px';card.style.height=Math.round(h)+'px';
+    card.classList.toggle('landscape',ratio>1.15);
+    const ratioSelect=node.querySelector('.sketch-ratio');
+    const closest=Object.entries(ratioSizes).sort((a,b)=>Math.abs(a[1][0]/a[1][1]-ratio)-Math.abs(b[1][0]/b[1][1]-ratio))[0]?.[0];
+    if(ratioSelect&&closest)ratioSelect.value=closest;
+    syncNodeChrome(node);wires();queueMiniMapRender();
+  }
+
+  function bindSketchNode(node){
+    // data-sketch-bound is serialized with the project HTML. Use the WeakMap as
+    // the runtime binding source of truth so restored/imported nodes are rebound.
+    if(!node?.classList?.contains('sketch-node')||sketchStates.has(node))return node;
+    node.dataset.sketchBound='1';
+    const board=node.querySelector('.sketch-canvas'),preview=node.querySelector('.sketch-preview'),card=node.querySelector('.sketch-card');
+    if(!board||!preview||!card)return node;
+    node.querySelectorAll('.quick-replace,.quick-fit').forEach(control=>control.remove());
+    const context=board.getContext('2d',{willReadFrequently:false});
+    const state={drawing:false,tool:node.dataset.sketchTool||'pen',color:node.dataset.sketchColor||'#17191d',undo:[],redo:[],before:''};
+    sketchStates.set(node,state);
+    node.ondblclick=e=>e.stopPropagation();
+
+    function whiteBackground(){context.save();context.globalCompositeOperation='source-over';context.fillStyle='#fff';context.fillRect(0,0,board.width,board.height);context.restore()}
+    function syncPreview(save=true){preview.src=board.toDataURL('image/png');node.dataset.sketchUpdatedAt=String(Date.now());if(save)scheduleSave()}
+    function setTool(tool){state.tool=tool;node.dataset.sketchTool=tool;node.querySelector('.sketch-pen')?.classList.toggle('on',tool==='pen');node.querySelector('.sketch-eraser')?.classList.toggle('on',tool==='eraser');board.style.cursor=tool==='eraser'?'cell':'crosshair'}
+    function restoreBitmap(url,{record=false}={}){
+      if(!url)return;
+      const image=new Image();
+      image.onload=()=>{
+        board.width=image.naturalWidth||1024;board.height=image.naturalHeight||768;
+        whiteBackground();context.drawImage(image,0,0,board.width,board.height);updateSketchCardRatio(node,board.width,board.height);syncPreview(record)
+      };
+      image.src=url;
+    }
+    function snapshotBefore(){state.before=board.toDataURL('image/png')}
+    function finishChange(){const after=board.toDataURL('image/png');if(state.before&&state.before!==after){state.undo.push(state.before);if(state.undo.length>24)state.undo.shift();state.redo.length=0}state.before='';preview.src=after;node.dataset.sketchUpdatedAt=String(Date.now());scheduleSave()}
+    function point(event){const rect=board.getBoundingClientRect();return{x:(event.clientX-rect.left)*board.width/rect.width,y:(event.clientY-rect.top)*board.height/rect.height}}
+    function begin(event){if(event.button!==0)return;event.preventDefault();event.stopPropagation();selectNode(node,false,true);snapshotBefore();state.drawing=true;board.setPointerCapture?.(event.pointerId);const p=point(event);context.beginPath();context.moveTo(p.x,p.y);context.lineTo(p.x+.01,p.y+.01);context.lineCap='round';context.lineJoin='round';context.lineWidth=Number(node.querySelector('.sketch-size')?.value||10);context.strokeStyle=state.tool==='eraser'?'#ffffff':state.color;context.globalCompositeOperation='source-over';context.stroke()}
+    function move(event){if(!state.drawing)return;event.preventDefault();event.stopPropagation();const p=point(event);context.lineTo(p.x,p.y);context.lineWidth=Number(node.querySelector('.sketch-size')?.value||10)*Math.max(.55,Number(event.pressure)||1);context.stroke()}
+    function end(event){if(!state.drawing)return;event.preventDefault();event.stopPropagation();state.drawing=false;try{board.releasePointerCapture?.(event.pointerId)}catch{}finishChange()}
+    board.onpointerdown=begin;board.onpointermove=move;board.onpointerup=end;board.onpointercancel=end;board.onlostpointercapture=end;
+
+    node.querySelector('.sketch-pen').onclick=e=>{e.stopPropagation();setTool('pen')};
+    node.querySelector('.sketch-eraser').onclick=e=>{e.stopPropagation();setTool('eraser')};
+    node.querySelectorAll('.sketch-color').forEach(button=>button.onclick=e=>{e.stopPropagation();state.color=button.dataset.color;node.dataset.sketchColor=state.color;node.querySelectorAll('.sketch-color').forEach(item=>item.classList.toggle('on',item===button));setTool('pen')});
+    node.querySelector('.sketch-undo').onclick=e=>{e.stopPropagation();const value=state.undo.pop();if(!value)return note('没有可撤销的笔画');state.redo.push(board.toDataURL('image/png'));restoreBitmap(value,{record:true})};
+    node.querySelector('.sketch-redo').onclick=e=>{e.stopPropagation();const value=state.redo.pop();if(!value)return note('没有可重做的笔画');state.undo.push(board.toDataURL('image/png'));restoreBitmap(value,{record:true})};
+    node.querySelector('.sketch-clear').onclick=e=>{e.stopPropagation();snapshotBefore();whiteBackground();finishChange();note('手绘画布已清空')};
+    node.querySelector('.sketch-download').onclick=e=>{e.stopPropagation();const link=document.createElement('a');link.href=board.toDataURL('image/png');link.download='KAI-手绘参考图.png';link.click()};
+    node.querySelector('.sketch-ratio').onchange=e=>{
+      e.stopPropagation();const size=ratioSizes[e.target.value];if(!size)return;
+      snapshotBefore();const old=document.createElement('canvas');old.width=board.width;old.height=board.height;old.getContext('2d').drawImage(board,0,0);
+      board.width=size[0];board.height=size[1];whiteBackground();const scale=Math.min(board.width/old.width,board.height/old.height),w=old.width*scale,h=old.height*scale;context.drawImage(old,(board.width-w)/2,(board.height-h)/2,w,h);updateSketchCardRatio(node,board.width,board.height);finishChange()
+    };
+
+    if(preview.getAttribute('src'))restoreBitmap(preview.src);else{whiteBackground();syncPreview(false);updateSketchCardRatio(node,board.width,board.height)}
+    setTool(state.tool);
+    node.querySelectorAll('.sketch-color').forEach(button=>button.classList.toggle('on',button.dataset.color===state.color));
+    return node;
+  }
+
+  function createSketchNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom){
+    const node=document.createElement('article');
+    node.className='node sketch-node uploaded-image-node';node.id='sketch-'+Date.now()+'-'+Math.random().toString(16).slice(2);
+    node.style.left=x+'px';node.style.top=y+'px';node.innerHTML=sketchMarkup();
+    world.appendChild(node);nodes.push(node);bindNode(node);bindSketchNode(node);selectNode(node);
+    commitHistory({undo:()=>{node.remove();wires()},redo:()=>{world.appendChild(node);bindNode(node);delete node.dataset.sketchBound;bindSketchNode(node);wires()}});
+    scheduleSave();note('手绘参考图已创建：画构图后，拉线连接到生图节点即可');return node
+  }
+
+  const rail=document.querySelector('.rail');
+  if(rail&&!rail.querySelector('[data-sketch-tool]')){
+    const button=document.createElement('button');button.className='tool';button.type='button';button.title='手绘参考图';button.dataset.sketchTool='1';button.innerHTML='<svg viewBox="0 0 24 24"><path d="M4 20l4.5-1 10-10a2.1 2.1 0 00-3-3l-10 10L4 20z"/><path d="M14 7l3 3M4 20h6"/></svg>';
+    const imageTool=[...rail.querySelectorAll('.tool')].find(item=>item.title==='图片');imageTool?.after(button);
+    // Capture the click so the original toolbar's generic "图片" handler cannot
+    // claim this dynamically inserted control in restored/older projects.
+    button.addEventListener('click',e=>{e.preventDefault();e.stopImmediatePropagation();rail.querySelectorAll('.tool').forEach(item=>item.classList.remove('on'));button.classList.add('on');createSketchNode()},true)
+  }
+
+  if(menu&&!menu.querySelector('[data-action="画布"]')){
+    const button=document.createElement('button');button.dataset.action='画布';button.textContent='手绘画布';
+    const generation=menu.querySelector('[data-action="生图"]');menu.insertBefore(button,generation||menu.firstChild);
+    button.onclick=e=>{
+      if(menu.dataset.connectionSourceId||pendingConnectionCreate?.source)return;
+      e.preventDefault();e.stopPropagation();menu.classList.remove('open');
+      const x=(lastMenuX-panX)/zoom,y=(lastMenuY-panY)/zoom;ripple(lastMenuX,lastMenuY);createSketchNode(x,y)
+    }
+  }
+
+  const priorExecuteContextAction=executeContextAction;
+  executeContextAction=function(action,x,y){if(action==='画布')return createSketchNode(x,y);return priorExecuteContextAction(action,x,y)};
+  const priorStableDraggedMenuAction=stableDraggedMenuAction;
+  stableDraggedMenuAction=function(action,source,x,y){
+    if(action!=='画布')return priorStableDraggedMenuAction(action,source,x,y);
+    const created=createSketchNode(x,y),wire=createStableWire(source,created);selectNode(created);refreshInputReferences();renderDockVariablesFor(created);wires();queueMiniMapRender();scheduleSave();note(wire?'已创建手绘画布并自动连接':'已创建手绘画布');return created
+  };
+
+  const observer=new MutationObserver(()=>document.querySelectorAll('.sketch-node').forEach(bindSketchNode));
+  observer.observe(world,{childList:true,subtree:true});
+  document.querySelectorAll('.sketch-node').forEach(bindSketchNode);
+})();
 </script>
 </body></html>
