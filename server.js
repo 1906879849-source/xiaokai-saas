@@ -12,6 +12,7 @@ const otterlChat = require('./src/providers/otterl-chat');
 const wallet = require('./src/wallet');
 const agentPricing = require('./src/agent-pricing');
 const accounts = require('./src/accounts');
+const workflows = require('./src/workflows');
 
 const app = express();
 const PORT = Number(process.env.PORT || 4318);
@@ -29,7 +30,7 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
   }
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -207,6 +208,25 @@ function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: '需要管理员权限' });
   next();
 }
+
+app.get('/api/workflows', (req, res) => {
+  res.json({ ok: true, workflows: workflows.list(), canManage: req.user?.role === 'admin' });
+});
+app.get('/api/workflows/:id', (req, res) => {
+  const item = workflows.get(req.params.id);
+  if (!item) return res.status(404).json({ ok: false, error: '工作流不存在或已下架' });
+  res.json({ ok: true, workflow: item.workflow, meta: { id: item.id, name: item.name, description: item.description || '' } });
+});
+app.post('/api/admin/workflows', requireAdmin, (req, res) => {
+  try {
+    const preset = workflows.save({ ...(req.body || {}), authorId: req.user.id });
+    res.json({ ok: true, preset });
+  } catch (error) { safeJsonError(res, error); }
+});
+app.delete('/api/admin/workflows/:id', requireAdmin, (req, res) => {
+  if (!workflows.remove(req.params.id)) return res.status(404).json({ ok: false, error: '工作流不存在' });
+  res.json({ ok: true });
+});
 
 app.get('/api/admin/recharges', requireAdmin, (req, res) => {
   res.json({ ok: true, recharges: accounts.listRecharges('', req.query.limit || 100) });
