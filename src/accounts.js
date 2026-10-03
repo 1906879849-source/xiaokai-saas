@@ -128,13 +128,19 @@ function saveReceipt(userId, dataUrl) {
   return name;
 }
 
-function createRecharge({ userId, amountRmb, channel, payerNote, receiptDataUrl }) {
+function createRecharge({ userId, amountRmb, channel, payerNote, receiptDataUrl, clientRequestId }) {
   const amount = Number(amountRmb);
   if (!Number.isFinite(amount) || amount < 1 || amount > 100000) throw Object.assign(new Error('充值金额需要在 ¥1–¥100000 之间'), { statusCode: 400 });
   if (!['wechat', 'alipay'].includes(channel)) throw Object.assign(new Error('请选择微信或支付宝'), { statusCode: 400 });
+  const requestKey = String(clientRequestId || '').trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100);
+  const existing = Object.values(store.recharges).find(item => item.userId === userId && (
+    (requestKey && item.clientRequestId === requestKey) ||
+    (item.status === 'pending' && item.channel === channel && Number(item.amountRmb) === Number(amount.toFixed(2)) && Date.now() - Number(item.createdAt || 0) < 90 * 1000)
+  ));
+  if (existing) return { ...existing, receiptFile: undefined, duplicate: true };
   const receiptFile = receiptDataUrl ? saveReceipt(userId, receiptDataUrl) : '';
   const id = `RC${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
-  const item = { id, userId, amountRmb: Number(amount.toFixed(2)), points: Math.round(amount * 100), channel, payerNote: String(payerNote || '').trim().slice(0, 120), receiptFile, status: 'pending', createdAt: Date.now(), reviewedAt: 0, reviewerId: '', reviewNote: '' };
+  const item = { id, userId, clientRequestId: requestKey, amountRmb: Number(amount.toFixed(2)), points: Math.round(amount * 100), channel, payerNote: String(payerNote || '').trim().slice(0, 120), receiptFile, status: 'pending', createdAt: Date.now(), reviewedAt: 0, reviewerId: '', reviewNote: '' };
   store.recharges[id] = item; persist(); return { ...item, receiptFile: undefined };
 }
 function listRecharges(userId, limit = 30) {
@@ -152,6 +158,10 @@ function receiptPath(id) {
   const item = store.recharges[id];
   return item?.receiptFile ? path.join(RECEIPT_DIR, item.receiptFile) : '';
 }
+function getRecharge(id) {
+  const item = store.recharges[id];
+  return item ? { ...item, receiptFile: undefined } : null;
+}
 function listUsers() { return Object.values(store.users).map(publicUser).sort((a, b) => b.createdAt - a.createdAt); }
 
 ensureAdminFromEnv();
@@ -163,4 +173,4 @@ if (String(process.env.NODE_ENV || '').toLowerCase() === 'production') {
   }
 }
 
-module.exports = { register, authenticate, createSession, sessionUser, revokeSession, createRecharge, listRecharges, reviewRecharge, receiptPath, listUsers };
+module.exports = { register, authenticate, createSession, sessionUser, revokeSession, createRecharge, listRecharges, reviewRecharge, receiptPath, getRecharge, listUsers };

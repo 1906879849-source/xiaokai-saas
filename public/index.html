@@ -2940,6 +2940,7 @@ splitGrid=async function(n){
 
 </script>
 <script src="wallet-ui.js"></script>
+<script src="announcement-ui.js"></script>
 <script>
 /* REAL_AGENT_BACKEND_V1 */
 (function(){
@@ -3513,6 +3514,48 @@ splitGrid=async function(n){
     const redo=key==='y'||(key==='z'&&event.shiftKey);
     node.querySelector(redo?'.sketch-redo':'.sketch-undo')?.click();
   },true);
+})();
+</script>
+<script>
+(()=>{
+  const originalImportWorkflow=importWorkflow;
+  importWorkflow=function(data){
+    const existing=new Set(nodes);
+    const result=originalImportWorkflow(data);
+    const instance='workflow-'+Date.now()+'-'+Math.random().toString(16).slice(2);
+    nodes.filter(node=>!existing.has(node)).forEach(node=>{node.dataset.workflowInstance=instance;node.dataset.workflowImportedAt=String(Date.now())});
+    scheduleSave();
+    return result;
+  };
+
+  function runnable(node){return node?.isConnected&&(node.classList.contains('agent-node')||node.classList.contains('generation-node')||Boolean(node.querySelector('.video-art')))}
+  function latestWorkflowNodes(){
+    const grouped=new Map();
+    nodes.forEach(node=>{const key=node.dataset.workflowInstance;if(!key)return;const item=grouped.get(key)||{time:0,nodes:[]};item.time=Math.max(item.time,Number(node.dataset.workflowImportedAt)||0);item.nodes.push(node);grouped.set(key,item)});
+    const latest=[...grouped.values()].sort((a,b)=>b.time-a.time)[0];
+    if(latest?.nodes?.length)return latest.nodes;
+    if(selectedNodes?.size>1)return [...selectedNodes];
+    return nodes.filter(node=>node.isConnected);
+  }
+  function orderedWorkflowNodes(scope){
+    const scopeSet=new Set(scope),indegree=new Map(scope.map(node=>[node.id,0])),outgoing=new Map(scope.map(node=>[node.id,[]]));
+    document.querySelectorAll('.wire path[data-a][data-b]').forEach(path=>{const from=document.getElementById(path.dataset.a),to=document.getElementById(path.dataset.b);if(!scopeSet.has(from)||!scopeSet.has(to)||from===to)return;outgoing.get(from.id).push(to.id);indegree.set(to.id,(indegree.get(to.id)||0)+1)});
+    const ready=scope.filter(node=>(indegree.get(node.id)||0)===0).sort((a,b)=>(parseFloat(a.style.left)||0)-(parseFloat(b.style.left)||0));
+    const ordered=[];
+    while(ready.length){const node=ready.shift();ordered.push(node);for(const id of outgoing.get(node.id)||[]){indegree.set(id,indegree.get(id)-1);if(indegree.get(id)===0)ready.push(document.getElementById(id))}}
+    scope.forEach(node=>{if(!ordered.includes(node))ordered.push(node)});
+    return ordered.filter(runnable);
+  }
+  function runWholeWorkflow(){
+    if(workflowQueue.some(task=>task.status==='pending'||task.status==='running'))return note('任务队列正在运行，请等待完成或先取消任务');
+    const targets=orderedWorkflowNodes(latestWorkflowNodes());
+    if(!targets.length)return note('当前工作流中没有可运行的 Agent、生图或视频节点');
+    const workflowRunId='whole-'+Date.now();
+    targets.forEach(node=>queueNodeExecution(node,{workflowRunId}));
+    note('已按连线顺序加入整套工作流，共 '+targets.length+' 个任务');
+  }
+  const actions=document.querySelector('.task-queue-actions');
+  if(actions&&!document.getElementById('runWholeWorkflow')){const button=document.createElement('button');button.id='runWholeWorkflow';button.textContent='运行工作流';button.title='按节点连线顺序一次运行当前整套工作流';button.onclick=runWholeWorkflow;actions.prepend(button)}
 })();
 </script>
 </body></html>

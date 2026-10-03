@@ -13,6 +13,7 @@ const wallet = require('./src/wallet');
 const agentPricing = require('./src/agent-pricing');
 const accounts = require('./src/accounts');
 const workflows = require('./src/workflows');
+const announcements = require('./src/announcements');
 
 const app = express();
 const PORT = Number(process.env.PORT || 4318);
@@ -204,6 +205,10 @@ app.get('/api/recharges', (req, res) => {
   res.json({ ok: true, recharges: accounts.listRecharges(req.user.id, req.query.limit), wallet: wallet.publicWallet() });
 });
 
+app.get('/api/announcements', (req, res) => {
+  res.json({ ok: true, announcements: announcements.list({ activeOnly: true }) });
+});
+
 function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') return res.status(403).json({ ok: false, error: '需要管理员权限' });
   next();
@@ -251,10 +256,25 @@ app.get('/api/admin/recharges/:id/receipt', requireAdmin, (req, res) => {
 });
 app.post('/api/admin/recharges/:id/review', requireAdmin, (req, res) => {
   try {
+    const before = accounts.getRecharge(req.params.id);
+    if (!before) return res.status(404).json({ ok: false, error: '充值申请不存在' });
+    if (before.status !== 'pending') return res.status(409).json({ ok: false, error: '这笔充值已经审核过，不能重复到账' });
+    if (req.body?.status === 'approved') wallet.runAs(before.userId, () => wallet.grant(before.points, `充值到账：${before.id}`, `recharge:${before.id}`));
     const recharge = accounts.reviewRecharge(req.params.id, { reviewerId: req.user.id, status: req.body?.status, reviewNote: req.body?.reviewNote });
-    if (recharge.status === 'approved') wallet.runAs(recharge.userId, () => wallet.grant(recharge.points, `充值到账：${recharge.id}`));
     res.json({ ok: true, recharge });
   } catch (error) { safeJsonError(res, error); }
+});
+
+app.get('/api/admin/announcements', requireAdmin, (req, res) => {
+  res.json({ ok: true, announcements: announcements.list() });
+});
+app.post('/api/admin/announcements', requireAdmin, (req, res) => {
+  try { res.json({ ok: true, announcement: announcements.create(req.body || {}, req.user.id) }); }
+  catch (error) { safeJsonError(res, error); }
+});
+app.delete('/api/admin/announcements/:id', requireAdmin, (req, res) => {
+  if (!announcements.remove(req.params.id)) return res.status(404).json({ ok: false, error: '公告不存在' });
+  res.json({ ok: true });
 });
 
 app.post('/api/agent/run', async (req, res) => {

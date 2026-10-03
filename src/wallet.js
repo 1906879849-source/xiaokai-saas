@@ -88,6 +88,7 @@ function blankStore(userId = currentUserId()) {
     reservations: {},
     tasks: {},
     requests: {},
+    grants: {},
     ledger: starting ? [{
       id: crypto.randomUUID(), type: 'opening', amount: starting,
       note: '测试初始积分', createdAt: Date.now(),
@@ -360,11 +361,17 @@ function recentLedger(limit = 30) {
   return store.ledger.slice(0, Math.max(1, Math.min(100, Number(limit) || 30)));
 }
 
-function grant(amount, note = '手动增加测试积分') {
+function grant(amount, note = '手动增加测试积分', idempotencyKey = '') {
   const value = Number(amount);
   if (!Number.isInteger(value) || value < 1 || value > 1000000) throw new Error('积分必须是 1–1000000 的整数');
+  const key = String(idempotencyKey || '').trim().slice(0, 160);
+  if (key && store.grants?.[key]) return publicWallet();
   store.balance += value;
-  addLedger('grant', value, note);
+  addLedger('grant', value, note, key ? { idempotencyKey: key } : {});
+  if (key) {
+    if (!store.grants || typeof store.grants !== 'object') store.grants = {};
+    store.grants[key] = { amount: value, createdAt: Date.now() };
+  }
   persist();
   return publicWallet();
 }
