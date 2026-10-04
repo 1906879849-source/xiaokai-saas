@@ -2685,6 +2685,16 @@ splitGrid=async function(n){
   const recoveringAgentNodes=new WeakSet();
   let manualRecoveryBusy=false;
 
+  async function apiFetch(path,{method='GET',body,headers={},timeoutMs=45000}={}){
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),timeoutMs);
+    try{
+      const response=await fetch(path,{method,credentials:'same-origin',signal:controller.signal,headers:{...(body?{'Content-Type':'application/json'}:{}),...headers},body:body&&typeof body!=='string'?JSON.stringify(body):body});
+      const data=await response.json().catch(()=>({}));
+      if(!response.ok||data.ok===false)throw new Error(data.error||('HTTP '+response.status));
+      return data;
+    }finally{clearTimeout(timer)}
+  }
+
   function savedProviderTasks(node){
     try{
       const value=JSON.parse(node?.dataset?.providerTasks||'[]');
@@ -2830,7 +2840,7 @@ splitGrid=async function(n){
       }
       if(recovered){scheduleSave();try{await saveProject()}catch{}}
       return recovered;
-    }catch(error){console.warn('读取 Agent 历史结果失败',error);return 0}
+    }catch(error){if(!/请先登录/.test(error?.message||''))console.warn('读取 Agent 历史结果失败',error);return 0}
   }
 
   async function recoverKieTasks({manual=false,quiet=false}={}){
@@ -3520,8 +3530,10 @@ splitGrid=async function(n){
     const existing=new Set(nodes);
     const result=originalImportWorkflow(data);
     const instance='workflow-'+Date.now()+'-'+Math.random().toString(16).slice(2);
-    nodes.filter(node=>!existing.has(node)).forEach(node=>{node.dataset.workflowInstance=instance;node.dataset.workflowImportedAt=String(Date.now())});
+    const importedNodes=nodes.filter(node=>!existing.has(node));
+    importedNodes.forEach(node=>{node.dataset.workflowInstance=instance;node.dataset.workflowImportedAt=String(Date.now())});
     scheduleSave();
+    document.dispatchEvent(new CustomEvent('kai:workflow-imported',{detail:{instance,nodeIds:importedNodes.map(node=>node.id)}}));
     return result;
   };
 
@@ -3556,4 +3568,6 @@ splitGrid=async function(n){
 })();
 </script>
 <script src="canvas-features.js"></script>
+<link rel="stylesheet" href="platform-features.css">
+<script src="platform-features.js"></script>
 </body></html>

@@ -14,9 +14,11 @@ const agentPricing = require('./src/agent-pricing');
 const accounts = require('./src/accounts');
 const workflows = require('./src/workflows');
 const announcements = require('./src/announcements');
+const platformSettings = require('./src/platform-settings');
 
 const app = express();
 const PORT = Number(process.env.PORT || 4318);
+const STARTED_AT = Date.now();
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const GENERATED_DIR = process.env.GENERATED_DIR ? path.resolve(process.env.GENERATED_DIR) : path.join(__dirname, 'generated');
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
@@ -126,15 +128,37 @@ async function cacheRemoteResults(taskId, urls) {
 }
 
 app.get('/api/health', (req, res) => {
+  const settings = platformSettings.read();
   res.json({
     ok: true,
     service: 'xiaokai-kie-v1',
+    version: String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_VERSION || 'local').slice(0, 12),
+    startedAt: STARTED_AT,
+    uptimeSeconds: Math.floor(process.uptime()),
+    maintenance: settings.maintenance,
     kieConfigured: Boolean((process.env.KIE_API_KEY || '').trim()),
     otterlConfigured: otterlImage.configured(),
     imageProvider: preferredImageProvider(),
     models: listModels(),
     agentModels: otterlChat.listModels(),
   });
+});
+
+app.get('/api/platform/status', (req, res) => {
+  const settings = platformSettings.read();
+  res.json({
+    ok: true,
+    service: 'xiaokai-kie-v1',
+    status: settings.maintenance.enabled ? 'maintenance' : 'operational',
+    maintenance: settings.maintenance,
+    version: String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_VERSION || 'local').slice(0, 12),
+    startedAt: STARTED_AT,
+    serverTime: Date.now(),
+  });
+});
+
+app.get('/api/models', (req, res) => {
+  res.json({ ok: true, models: platformSettings.publicModels(), pointValueRmb: wallet.pointValueRmb() });
 });
 
 function cookieToken(req) {
@@ -185,13 +209,22 @@ app.get('/api/auth/me', (req, res) => {
   wallet.runAs(user.id, () => res.json({ ok: true, user, wallet: wallet.publicWallet() }));
 });
 
-const PUBLIC_API = new Set(['/health', '/auth/register', '/auth/login', '/auth/logout', '/auth/me', '/callback/kie']);
+const PUBLIC_API = new Set(['/health', '/platform/status', '/models', '/auth/register', '/auth/login', '/auth/logout', '/auth/me', '/callback/kie']);
 app.use('/api', (req, res, next) => {
   if (PUBLIC_API.has(req.path)) return next();
   const user = accounts.sessionUser(requestToken(req));
   if (!user) return res.status(401).json({ ok: false, error: '请先登录后再使用画布' });
   req.user = user;
   wallet.runAs(user.id, next);
+});
+
+app.use('/api', (req, res, next) => {
+  const maintenance = platformSettings.read().maintenance;
+  const startingPaidTask = req.method === 'POST' && ['/agent/run', '/image/generate'].includes(req.path);
+  if (maintenance.enabled && startingPaidTask && req.user?.role !== 'admin') {
+    return res.status(503).json({ ok: false, code: 'MAINTENANCE', error: maintenance.message, maintenance });
+  }
+  next();
 });
 
 app.post('/api/recharges', (req, res) => {
@@ -275,6 +308,18 @@ app.post('/api/admin/announcements', requireAdmin, (req, res) => {
 app.delete('/api/admin/announcements/:id', requireAdmin, (req, res) => {
   if (!announcements.remove(req.params.id)) return res.status(404).json({ ok: false, error: '公告不存在' });
   res.json({ ok: true });
+});
+
+app.get('/api/admin/platform', requireAdmin, (req, res) => {
+  res.json({ ok: true, settings: platformSettings.read(), health: { startedAt: STARTED_AT, uptimeSeconds: Math.floor(process.uptime()), version: String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.APP_VERSION || 'local').slice(0, 12), kieConfigured: Boolean((process.env.KIE_API_KEY || '').trim()), otterlConfigured: otterlImage.configured() } });
+});
+app.put('/api/admin/platform/maintenance', requireAdmin, (req, res) => {
+  try { res.json({ ok: true, settings: platformSettings.updateMaintenance(req.body || {}, req.user.username) }); }
+  catch (error) { safeJsonError(res, error); }
+});
+app.put('/api/admin/platform/models', requireAdmin, (req, res) => {
+  try { res.json({ ok: true, settings: platformSettings.updateModels(req.body?.models, req.user.username) }); }
+  catch (error) { safeJsonError(res, error); }
 });
 
 app.post('/api/agent/run', async (req, res) => {
@@ -448,7 +493,12 @@ app.post('/api/image/generate', async (req, res) => {
     const prompt = String(body.prompt || '').trim();
     if (!prompt) return res.status(400).json({ ok: false, error: 'Prompt 不能为空' });
 
-    const price = wallet.quote({ model: modelName, resolution: body.resolution, count: body.count });
+    const requestedResolution = platformSettings.normalizeResolution(body.resolution) || model.fixedResolution || model.resolutions[0];
+    if (!model.resolutions.includes(requestedResolution)) {
+      return res.status(400).json({ ok: false, error: `${modelName} 不支持 ${requestedResolution}，可用分辨率：${model.resolutions.join('、')}` });
+    }
+
+    const price = wallet.quote({ model: modelName, resolution: requestedResolution, count: body.count });
     const requestId = String(req.get('Idempotency-Key') || body.requestId || '').trim();
     const held = wallet.reserve(requestId, price);
     if (held.duplicate) {

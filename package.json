@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check src/model-router.js && node --check src/providers/kie.js && node --check src/providers/mock-image.js && node --check src/providers/otterl-image.js && node --check src/providers/otterl-chat.js && node --check src/providers/kie-chat.js && node --check src/agent-pricing.js && node --check src/accounts.js && node --check src/wallet.js && node --check public/wallet-ui.js",
+    "check": "node --check server.js && node --check src/model-router.js && node --check src/platform-settings.js && node --check src/providers/kie.js && node --check src/providers/mock-image.js && node --check src/providers/otterl-image.js && node --check src/providers/otterl-chat.js && node --check src/providers/kie-chat.js && node --check src/agent-pricing.js && node --check src/accounts.js && node --check src/wallet.js && node --check public/wallet-ui.js && node --check public/platform-features.js",
     "test:wallet": "node test-wallet.cjs",
     "test:agent-recovery": "node test-agent-recovery.cjs",
     "test:image-recovery": "node test-image-recovery.cjs"

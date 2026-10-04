@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
 const agentPricing = require('./agent-pricing');
+const platformSettings = require('./platform-settings');
 
 const LEGACY_DATA_DIR = path.join(__dirname, '..', 'data');
 // 积分和账号必须落在同一个 Railway 持久化卷。优先使用专用变量，
@@ -161,8 +162,8 @@ function quote({ model, resolution, count = 1 }) {
   if (String(model || '').startsWith('Agent · ')) {
     return agentPricing.estimate(String(model).replace(/^Agent · /, ''));
   }
-  const pricing = PRICES[model];
-  if (!pricing) {
+  const dynamic = platformSettings.priceFor(model, resolution);
+  if (!dynamic) {
     const error = new Error(`模型未配置积分价格：${model || '未选择'}`);
     error.statusCode = 400;
     throw error;
@@ -173,8 +174,8 @@ function quote({ model, resolution, count = 1 }) {
     error.statusCode = 400;
     throw error;
   }
-  const normalizedResolution = normalizeResolution(resolution);
-  const unit = pricing[normalizedResolution] ?? pricing.default;
+  const normalizedResolution = dynamic.resolution;
+  const unit = dynamic.unit;
   const total = unit * quantity;
   return {
     model, resolution: normalizedResolution, count: quantity, unit, total,
@@ -412,7 +413,10 @@ function recentAgentResults(limit = 20) {
     }));
 }
 
-function pricing() { return PRICES; }
+function pricing() {
+  const imagePrices = Object.fromEntries(platformSettings.publicModels().map(model => [model.name, { ...model.prices, default: model.prices[model.resolutions[0]] }]));
+  return { ...PRICES, ...imagePrices };
+}
 function pointValueRmb() { return POINT_VALUE_RMB; }
 
 module.exports = {

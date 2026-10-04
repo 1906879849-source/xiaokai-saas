@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const platformSettings = require('../platform-settings');
 
 const tasks = new Map();
 const GENERATED_DIR = process.env.GENERATED_DIR ? path.resolve(process.env.GENERATED_DIR) : path.join(__dirname, '..', '..', 'generated');
@@ -50,7 +51,7 @@ function apiKey() {
 }
 
 function supportsModel(modelName) {
-  return Boolean(MODEL_IDS[modelName]);
+  return Boolean(platformSettings.resolveModel(modelName));
 }
 
 function configured() {
@@ -436,10 +437,11 @@ async function runTask(task) {
 }
 
 async function createImageTask({ modelName, prompt, aspectRatio, resolution, imageUrls = [], maskUrl = '', background = '', operation = '' }) {
-  const requestedResolution = FIXED_4K_MODELS.has(modelName) ? '4K' : normalizeResolution(resolution);
-  const supportedResolutions = MODEL_RESOLUTIONS[modelName] || ['1K'];
+  const runtimeModel = platformSettings.resolveModel(modelName);
+  const requestedResolution = runtimeModel?.fixedResolution || (FIXED_4K_MODELS.has(modelName) ? '4K' : normalizeResolution(resolution));
+  const supportedResolutions = runtimeModel?.resolutions || MODEL_RESOLUTIONS[modelName] || ['1K'];
   const normalizedResolution = supportedResolutions.includes(requestedResolution) ? requestedResolution : supportedResolutions[0];
-  const model = MODEL_IDS[modelName];
+  const model = runtimeModel?.id || MODEL_IDS[modelName];
   if (!model) {
     const error = new Error(`OtterL 暂未映射模型：${modelName}`);
     error.statusCode = 400;

@@ -1,5 +1,7 @@
-// Keep this registry in sync with the image picker, wallet pricing and the
-// OtterL adapter. Only models that are actually exposed by OtterL live here.
+const platformSettings = require('./platform-settings');
+
+// Static defaults remain exported for compatibility. Runtime reads come from
+// the persistent admin-managed platform settings.
 const MODEL_REGISTRY = {
   'GPT Image 2': {
     provider: 'otterl', id: 'gpt-image-2', taskApi: 'otterl',
@@ -32,11 +34,11 @@ const MODEL_REGISTRY = {
 };
 
 function resolveModel(name) {
-  return MODEL_REGISTRY[name] || null;
+  return platformSettings.resolveModel(name);
 }
 
 function listModels() {
-  return Object.entries(MODEL_REGISTRY).map(([name, meta]) => ({ name, ...meta }));
+  return platformSettings.publicModels();
 }
 
 module.exports = { resolveModel, listModels, MODEL_REGISTRY };
