@@ -575,7 +575,8 @@ app.get('/api/task/:taskId', async (req, res) => {
       urls = await cacheRemoteResults(task.taskId, urls);
     }
     if (task.state === 'success' && task.billingEligible !== false) wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
-    if (task.state === 'success' && task.billingEligible === false) wallet.settleTask(task.taskId, false, { failCode: 'RESULT_NOT_PERSISTED', resultUrls: urls, providerModel: task.model });
+    // 临时地址已经生成、但服务器尚未完成长期保存时保持冻结。
+    // 等浏览器确认图片确实加载成功后，再由 confirm-delivery 正式扣分。
     if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
     const base = `${req.protocol}://${req.get('host')}`;
     const absoluteUrls = urls.map(url => url.startsWith('/') ? `${base}${url}` : url);
@@ -592,8 +593,42 @@ app.get('/api/task/:taskId', async (req, res) => {
       costTime: task.costTime,
       creditsConsumed: task.creditsConsumed,
       billingEligible: task.billingEligible !== false,
+      resolution: task.resolution || '1K',
       wallet: wallet.publicWallet(),
     });
+  } catch (error) {
+    safeJsonError(res, error);
+  }
+});
+
+app.post('/api/task/:taskId/confirm-delivery', async (req, res) => {
+  try {
+    const taskApi = req.query.api === 'mock' ? 'mock' : req.query.api === 'gpt4o' ? 'gpt4o' : req.query.api === 'otterl' ? 'otterl' : 'market';
+    const selectedProvider = providerFromTaskApi(taskApi);
+    const task = await selectedProvider.client.getTask(req.params.taskId, taskApi);
+    if (task.state !== 'success' || !Array.isArray(task.resultUrls) || !task.resultUrls.length) {
+      return res.status(409).json({ ok: false, error: '图片任务尚未成功，不能确认交付', wallet: wallet.publicWallet() });
+    }
+    const width = Math.max(0, Number(req.body?.width) || 0);
+    const height = Math.max(0, Number(req.body?.height) || 0);
+    const longest = Math.max(width, height);
+    const resolution = String(task.resolution || '1K').toUpperCase();
+    const minimum = resolution === '4K' ? 3500 : resolution === '2K' ? 1800 : 700;
+    if (!width || !height || longest < minimum) {
+      wallet.settleTask(task.taskId, false, { failCode: 'DELIVERY_PIXEL_CHECK_FAILED', width, height, resolution });
+      return res.status(422).json({ ok: false, error: `图片像素未达到 ${resolution} 要求（实际 ${width}×${height}），积分已返还`, wallet: wallet.publicWallet() });
+    }
+    const urls = await cacheRemoteResults(task.taskId, task.resultUrls);
+    const nextWallet = wallet.settleTask(task.taskId, true, {
+      providerCredits: task.creditsConsumed,
+      resultUrls: urls,
+      providerModel: task.model,
+      deliveryConfirmed: true,
+      width,
+      height,
+      resolution,
+    });
+    res.json({ ok: true, charged: true, taskId: task.taskId, width, height, resolution, wallet: nextWallet });
   } catch (error) {
     safeJsonError(res, error);
   }
@@ -626,7 +661,7 @@ async function reconcileWalletTasks() {
             const urls = task.resultUrls?.length ? await cacheRemoteResults(task.taskId, task.resultUrls) : [];
             wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
           }
-          if (task.state === 'success' && task.billingEligible === false) wallet.settleTask(task.taskId, false, { failCode: 'RESULT_NOT_PERSISTED', providerModel: task.model });
+          // 临时结果等待浏览器 confirm-delivery；超时未确认再由冻结超时机制自动返还。
           if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
         } catch (error) {
           console.warn('[wallet reconcile]', userId, item.taskId, error.message);

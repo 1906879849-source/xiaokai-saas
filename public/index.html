@@ -2374,6 +2374,28 @@ splitGrid=async function(n){
     loadPromptFromNode(node);
     scheduleSave();
   }
+  function loadDeliveredImage(url,timeoutMs=30000){
+    return new Promise((resolve,reject)=>{
+      const image=new Image();
+      const timer=setTimeout(()=>{image.src='';reject(new Error('图片加载超时，暂不扣积分'))},timeoutMs);
+      image.onload=()=>{clearTimeout(timer);if(image.naturalWidth&&image.naturalHeight)resolve({width:image.naturalWidth,height:image.naturalHeight});else reject(new Error('无法读取图片像素，暂不扣积分'))};
+      image.onerror=()=>{clearTimeout(timer);reject(new Error('图片没有成功加载，暂不扣积分'))};
+      image.src=url;
+    });
+  }
+  async function confirmTemporaryDeliveries(providerTasks,successes){
+    const temporary=successes.filter(item=>item.billingEligible===false);
+    for(const item of temporary){
+      const url=Array.isArray(item.urls)?item.urls.find(Boolean):'';
+      if(!url)throw new Error('上游没有返回可确认的图片地址，暂不扣积分');
+      const dimensions=await loadDeliveredImage(url);
+      const meta=providerTasks.find(task=>task.taskId===item.taskId)||{};
+      const api=meta.taskApi==='gpt4o'?'?api=gpt4o':meta.taskApi==='mock'?'?api=mock':meta.taskApi==='otterl'?'?api=otterl':'';
+      const confirmed=await apiFetch('/api/task/'+encodeURIComponent(item.taskId)+'/confirm-delivery'+api,{method:'POST',body:dimensions,timeoutMs:90000});
+      window.KAI_WALLET?.apply(confirmed.wallet);
+    }
+    return temporary.length;
+  }
   async function pollProviderTasks(providerTasks,task,node,controller){
     const states=new Map(providerTasks.map(x=>[x.taskId,{state:'waiting',urls:[]}]))
     const deadline=Date.now()+8*60*1000;
@@ -2453,14 +2475,14 @@ splitGrid=async function(n){
         throw new Error(reason);
       }
       applyRealResults(node,result.urls,resolved,task);
+      const temporaryCount=await confirmTemporaryDeliveries(created.tasks,result.successes);
       node.dataset.providerRecoveryState='done';
       task.status='done';task.phase='success';
-      const unbilledTemporary=result.successes.some(item=>item.billingEligible===false);
-      task.note=unbilledTemporary?'已显示临时结果 · 未扣积分':result.failures.length?(`部分成功 ${result.successes.length}/${created.tasks.length}`):'生成成功';
+      task.note=temporaryCount?'生成成功 · 已确认交付':result.failures.length?(`部分成功 ${result.successes.length}/${created.tasks.length}`):'生成成功';
       task.finishedAt=Date.now();task.durationMs=task.finishedAt-task.startedAt;
       if(result.failures.length)task.errorReason=result.failures.map(x=>x.failMsg||x.failCode).filter(Boolean).join('；');
-      setNodeStatus(node,'done',unbilledTemporary?'临时结果':result.failures.length?'部分成功':'已完成');
-      if(unbilledTemporary)note('图片已显示，但未完成本地保存与像素校验，本次没有扣客户积分');
+      setNodeStatus(node,'done',result.failures.length?'部分成功':'已完成');
+      if(temporaryCount)note('图片已确认加载成功，客户积分已正式扣除');
       else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'测试图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
       if(error?.name==='AbortError'||task.status==='canceled')return;
@@ -2511,7 +2533,7 @@ splitGrid=async function(n){
     }).catch(()=>{});
   });
   // Expose the two task helpers while they are still inside their defining scope.
-  window.KAI_IMAGE_RUNTIME={pollProviderTasks,applyRealResults};
+  window.KAI_IMAGE_RUNTIME={pollProviderTasks,applyRealResults,confirmTemporaryDeliveries};
 })();
 
 
@@ -2739,6 +2761,7 @@ splitGrid=async function(n){
       if(!result.successes.length)throw new Error(result.failures.map(x=>x.failMsg||x.failCode).filter(Boolean).join('；')||'任务没有可恢复结果');
       try{runtime.applyRealResults(node,result.urls,task.promptText,task)}
       catch(applyError){console.warn('标准恢复流程失败，改用图片直填',applyError);forceRecoveredImage(node,result.urls[0],task.promptText)}
+      if(runtime.confirmTemporaryDeliveries)await runtime.confirmTemporaryDeliveries(providerTasks,result.successes);
       node.dataset.providerTasks=JSON.stringify(providerTasks);
       node.dataset.providerRecoveryState='done';
       setNodeStatus(node,'done','已恢复');

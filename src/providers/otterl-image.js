@@ -250,6 +250,7 @@ function publicTask(task) {
     resultUrls: Array.isArray(task.resultUrls) ? task.resultUrls : [],
     sourceResultUrls: Array.isArray(task.sourceResultUrls) ? task.sourceResultUrls.filter(url => /^https?:\/\//i.test(String(url))) : [],
     billingEligible: task.billingEligible !== false,
+    resolution: task.resolution || '1K',
     failCode: task.failCode || '',
     failMsg: task.failMsg || '',
     creditsConsumed: task.creditsConsumed ?? null,
@@ -544,6 +545,7 @@ async function getTask(taskId) {
     costTime: (task.finishedAt || Date.now()) - task.createdAt,
     creditsConsumed: task.creditsConsumed,
     billingEligible: task.billingEligible !== false,
+    resolution: task.resolution || '1K',
     outputWidth: Number(task.outputWidth || 0),
     outputHeight: Number(task.outputHeight || 0),
   };
