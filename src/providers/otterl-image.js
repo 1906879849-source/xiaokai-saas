@@ -249,6 +249,7 @@ function publicTask(task) {
     progress: task.progress,
     resultUrls: Array.isArray(task.resultUrls) ? task.resultUrls : [],
     sourceResultUrls: Array.isArray(task.sourceResultUrls) ? task.sourceResultUrls.filter(url => /^https?:\/\//i.test(String(url))) : [],
+    billingEligible: task.billingEligible !== false,
     failCode: task.failCode || '',
     failMsg: task.failMsg || '',
     creditsConsumed: task.creditsConsumed ?? null,
@@ -288,36 +289,54 @@ function extensionFromType(type = '') {
 async function cacheResultUrls(taskId, urls) {
   const cached = [];
   for (let index = 0; index < urls.length; index += 1) {
-    const source = String(urls[index] || '');
-    if (source.startsWith('/generated/')) {
-      cached.push(source);
+    const rawSource = String(urls[index] || '').trim();
+    if (rawSource.startsWith('/generated/')) {
+      cached.push(rawSource);
       continue;
     }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    try {
-      let buffer;
-      let contentType = 'image/png';
-      const dataMatch = source.match(/^data:([^;,]+);base64,(.+)$/i);
-      if (dataMatch) {
-        contentType = dataMatch[1] || contentType;
-        buffer = Buffer.from(dataMatch[2], 'base64');
-      } else {
-        const response = await fetch(source, { signal: controller.signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        contentType = response.headers.get('content-type') || contentType;
-        buffer = Buffer.from(await response.arrayBuffer());
+    let source = rawSource;
+    if (source && !/^data:/i.test(source)) {
+      try { source = new URL(source, `${new URL(apiBase()).origin}/`).toString(); }
+      catch { source = rawSource; }
+    }
+    let saved = false;
+    let lastError = null;
+    for (let attempt = 1; attempt <= 2 && !saved; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+      try {
+        let buffer;
+        let contentType = 'image/png';
+        const dataMatch = source.match(/^data:([^;,]+);base64,(.+)$/i);
+        if (dataMatch) {
+          contentType = dataMatch[1] || contentType;
+          buffer = Buffer.from(dataMatch[2], 'base64');
+        } else {
+          const headers = { Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8', 'User-Agent': 'Mozilla/5.0 kai-image-cache/1.0' };
+          try {
+            if (new URL(source).origin === new URL(apiBase()).origin) headers.Authorization = `Bearer ${apiKey()}`;
+          } catch {}
+          const response = await fetch(source, { signal: controller.signal, redirect: 'follow', headers });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          contentType = response.headers.get('content-type') || contentType;
+          buffer = Buffer.from(await response.arrayBuffer());
+        }
+        if (!buffer?.length) throw new Error('图片内容为空');
+        const digest = crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 12);
+        const fileName = `${safeTaskId(taskId)}-${index + 1}-${digest}${extensionFromType(contentType)}`;
+        fs.writeFileSync(path.join(GENERATED_DIR, fileName), buffer);
+        cached.push(`/generated/${encodeURIComponent(fileName)}`);
+        saved = true;
+      } catch (error) {
+        lastError = error;
+      } finally {
+        clearTimeout(timeout);
       }
-      if (!buffer?.length) throw new Error('图片内容为空');
-      const digest = crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 12);
-      const fileName = `${safeTaskId(taskId)}-${index + 1}-${digest}${extensionFromType(contentType)}`;
-      fs.writeFileSync(path.join(GENERATED_DIR, fileName), buffer);
-      cached.push(`/generated/${encodeURIComponent(fileName)}`);
-    } catch (error) {
-      // 缓存失败时保留原地址；任务记录仍会落盘，后续“找回结果”可以再次尝试缓存。
+    }
+    // 下载仍失败时保留绝对临时地址给前端显示；billingEligible 会阻止扣客户积分。
+    if (!saved && source) {
+      console.warn('[otterl image cache]', taskId, `result ${index + 1}`, lastError?.message || '保存失败');
       cached.push(source);
-    } finally {
-      clearTimeout(timeout);
     }
   }
   return cached.filter(Boolean);
@@ -418,10 +437,9 @@ async function runTask(task) {
     task.sourceResultUrls = urls;
     task.resultUrls = await cacheResultUrls(task.taskId, urls);
     const locallySaved = task.resultUrls.some(url => String(url).startsWith('/generated/') && hasLocalResult(url));
-    if (!locallySaved) {
-      throw new Error('上游已生成图片，但结果保存失败；本次客户积分不会扣除，请稍后重试');
-    }
-    assertRequestedResolution(task);
+    task.billingEligible = locallySaved;
+    if (locallySaved) assertRequestedResolution(task);
+    else task.failMsg = '图片已使用上游临时地址显示；因未完成本地保存与像素校验，本次客户积分不会扣除';
     task.state = 'success';
     task.progress = 100;
     task.creditsConsumed = json?.usage?.total_tokens ?? json?.usageMetadata?.totalTokenCount ?? null;
@@ -467,6 +485,7 @@ async function createImageTask({ modelName, prompt, aspectRatio, resolution, ima
     failCode: '',
     failMsg: '',
     creditsConsumed: null,
+    billingEligible: true,
     outputWidth: 0,
     outputHeight: 0,
     createdAt: Date.now(),
@@ -524,6 +543,7 @@ async function getTask(taskId) {
     failMsg: task.failMsg,
     costTime: (task.finishedAt || Date.now()) - task.createdAt,
     creditsConsumed: task.creditsConsumed,
+    billingEligible: task.billingEligible !== false,
     outputWidth: Number(task.outputWidth || 0),
     outputHeight: Number(task.outputHeight || 0),
   };

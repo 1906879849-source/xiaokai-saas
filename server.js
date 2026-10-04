@@ -574,7 +574,8 @@ app.get('/api/task/:taskId', async (req, res) => {
     if (task.state === 'success' && urls.length) {
       urls = await cacheRemoteResults(task.taskId, urls);
     }
-    if (task.state === 'success') wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
+    if (task.state === 'success' && task.billingEligible !== false) wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
+    if (task.state === 'success' && task.billingEligible === false) wallet.settleTask(task.taskId, false, { failCode: 'RESULT_NOT_PERSISTED', resultUrls: urls, providerModel: task.model });
     if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
     const base = `${req.protocol}://${req.get('host')}`;
     const absoluteUrls = urls.map(url => url.startsWith('/') ? `${base}${url}` : url);
@@ -590,6 +591,7 @@ app.get('/api/task/:taskId', async (req, res) => {
       failMsg: task.failMsg,
       costTime: task.costTime,
       creditsConsumed: task.creditsConsumed,
+      billingEligible: task.billingEligible !== false,
       wallet: wallet.publicWallet(),
     });
   } catch (error) {
@@ -620,10 +622,11 @@ async function reconcileWalletTasks() {
         try {
           const selectedProvider = providerFromTaskApi(item.taskApi || 'market');
           const task = await selectedProvider.client.getTask(item.taskId, item.taskApi || 'market');
-          if (task.state === 'success') {
+          if (task.state === 'success' && task.billingEligible !== false) {
             const urls = task.resultUrls?.length ? await cacheRemoteResults(task.taskId, task.resultUrls) : [];
             wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
           }
+          if (task.state === 'success' && task.billingEligible === false) wallet.settleTask(task.taskId, false, { failCode: 'RESULT_NOT_PERSISTED', providerModel: task.model });
           if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
         } catch (error) {
           console.warn('[wallet reconcile]', userId, item.taskId, error.message);

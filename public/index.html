@@ -2455,11 +2455,13 @@ splitGrid=async function(n){
       applyRealResults(node,result.urls,resolved,task);
       node.dataset.providerRecoveryState='done';
       task.status='done';task.phase='success';
-      task.note=result.failures.length?(`部分成功 ${result.successes.length}/${created.tasks.length}`):'生成成功';
+      const unbilledTemporary=result.successes.some(item=>item.billingEligible===false);
+      task.note=unbilledTemporary?'已显示临时结果 · 未扣积分':result.failures.length?(`部分成功 ${result.successes.length}/${created.tasks.length}`):'生成成功';
       task.finishedAt=Date.now();task.durationMs=task.finishedAt-task.startedAt;
       if(result.failures.length)task.errorReason=result.failures.map(x=>x.failMsg||x.failCode).filter(Boolean).join('；');
-      setNodeStatus(node,'done',result.failures.length?'部分成功':'已完成');
-      if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'测试图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
+      setNodeStatus(node,'done',unbilledTemporary?'临时结果':result.failures.length?'部分成功':'已完成');
+      if(unbilledTemporary)note('图片已显示，但未完成本地保存与像素校验，本次没有扣客户积分');
+      else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'测试图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
       if(error?.name==='AbortError'||task.status==='canceled')return;
       task.status='error';task.phase='failed';task.errorReason=error?.message||'生成失败';task.note=task.errorReason;
@@ -2829,18 +2831,8 @@ splitGrid=async function(n){
       const pending=nodes.filter(node=>!String(node.dataset.outputText||'').trim()&&node.dataset.agentRequestId);
       const statusResults=await Promise.all(pending.map(node=>recoverAgentNodeStatus(node,{wait:!manual})));
       recovered+=statusResults.filter(Boolean).length;
-      if(manual){
-        const cutoff=Date.now()-72*60*60*1000;
-        const unmatched=results.filter(item=>
-          Number(item.settledAt||item.createdAt||0)>=cutoff&&
-          !claimed.has('request:'+item.requestId)&&!claimed.has('task:'+item.taskId)
-        ).slice(0,6);
-        unmatched.forEach((item,index)=>{
-          const node=createAgentNode((canvas.clientWidth/2-panX)/zoom+index*42,(canvas.clientHeight/2-panY)/zoom+index*42);
-          const label=node.querySelector('.node-label');if(label)label.textContent='✦　找回的 Agent 对话';
-          if(applyRecoveredAgentResult(node,item))recovered+=1;
-        });
-      }
+      // 手动找回只处理当前画布已有节点及其 requestId/taskId。
+      // 不再把账号历史记录自动创建成新节点，避免旧内容重复出现在画布中。
       if(recovered){scheduleSave();try{await saveProject()}catch{}}
       return recovered;
     }catch(error){if(!/请先登录/.test(error?.message||''))console.warn('读取 Agent 历史结果失败',error);return 0}
@@ -2858,40 +2850,6 @@ splitGrid=async function(n){
     }
 
     if(manual){
-      try{
-        const data=await apiFetch('/api/tasks/recent?limit=30',{timeoutMs:10000});
-        const cutoff=Date.now()-72*60*60*1000;
-        const recent=(data.tasks||[]).filter(item=>
-          item?.taskId&&!claimed.has(item.taskId)&&['reserved','charged'].includes(item.state)&&
-          ['market','gpt4o','otterl','mock'].includes(item.taskApi||'market')&&Number(item.createdAt||0)>=cutoff
-        ).slice(0,6);
-        recent.forEach((item,index)=>{
-          const node=createGenerationNode(
-            (canvas.clientWidth/2-panX)/zoom+index*36,
-            (canvas.clientHeight/2-panY)/zoom+index*36
-          );
-          const tasks=[{taskId:item.taskId,taskApi:item.taskApi||'market',providerModel:item.model||''}];
-          node.querySelector('.node-label').textContent='▧　找回结果';
-          node.dataset.providerTasks=JSON.stringify(tasks);
-          node.dataset.providerModel=item.model||node.dataset.modelName||'GPT Image 2';
-          node.dataset.providerSubmittedAt=String(item.createdAt||Date.now());
-          node.dataset.providerRecoveryState='pending';
-          claimed.add(item.taskId);
-          const savedUrls=Array.isArray(item.resultUrls)?item.resultUrls.filter(Boolean):[];
-          if(savedUrls.length){
-            try{
-              forceRecoveredImage(node,savedUrls[0],item.prompt||'');
-              node.dataset.providerRecoveryState='done';
-              setNodeStatus(node,'done','已恢复');
-              recoveries.push(Promise.resolve(true));
-            }catch(error){recoveries.push(recoverNode(node,tasks,{legacy:true,quiet:true}))}
-          }else recoveries.push(recoverNode(node,tasks,{legacy:true,quiet:true}));
-        });
-      }catch(error){
-        console.warn('读取后台图片任务失败',error);
-        if(!quiet)note('找回失败：无法读取后台图片任务记录');
-        return 0;
-      }
       if(!recoveries.length){if(!quiet)note('没有发现需要找回的图片任务');return 0}
       scheduleSave();
       const results=await Promise.all(recoveries);
