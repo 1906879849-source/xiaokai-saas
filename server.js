@@ -634,6 +634,81 @@ app.post('/api/task/:taskId/confirm-delivery', async (req, res) => {
   }
 });
 
+app.get('/api/tasks/stream', (req, res) => {
+  const parseItems = (value, limit = 24) => {
+    try {
+      const parsed = JSON.parse(String(value || '[]'));
+      return Array.isArray(parsed) ? parsed.slice(0, limit) : [];
+    } catch { return []; }
+  };
+  const requestedImages = parseItems(req.query.images).filter(item => item?.taskId);
+  const requestedAgents = parseItems(req.query.agents).map(String).filter(Boolean);
+  const userId = req.user.id;
+  let closed = false;
+  let checking = false;
+  const lastStates = new Map();
+
+  res.status(200);
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.write('retry: 2000\n\n');
+
+  const emit = payload => {
+    if (!closed && !res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  };
+  const tick = async () => {
+    if (closed || checking) return;
+    checking = true;
+    try {
+      await wallet.runAs(userId, async () => {
+        const ownedTaskIds = new Set(wallet.recentTasks(100).map(item => item.taskId));
+        for (const item of requestedImages) {
+          const taskId = String(item.taskId || '');
+          if (!ownedTaskIds.has(taskId)) continue;
+          try {
+            const taskApi = ['mock', 'gpt4o', 'otterl'].includes(item.taskApi) ? item.taskApi : 'market';
+            const selectedProvider = providerFromTaskApi(taskApi);
+            const task = await selectedProvider.client.getTask(taskId, taskApi);
+            const state = String(task.state || 'waiting');
+            const key = `image:${taskId}`;
+            if (lastStates.get(key) !== state) {
+              lastStates.set(key, state);
+              emit({ kind: 'image', taskId, taskApi, state, progress: Number(task.progress || 0) });
+            }
+          } catch (error) {
+            const key = `image:${taskId}`;
+            if (lastStates.get(key) !== 'unavailable') {
+              lastStates.set(key, 'unavailable');
+              emit({ kind: 'image', taskId, state: 'unavailable' });
+            }
+          }
+        }
+        for (const requestId of requestedAgents) {
+          const item = wallet.taskByRequest(requestId);
+          if (!item || item.taskApi !== 'agent') continue;
+          const state = String(item.state || 'reserved');
+          const key = `agent:${requestId}`;
+          if (lastStates.get(key) !== state) {
+            lastStates.set(key, state);
+            emit({ kind: 'agent', requestId, taskId: item.taskId, state });
+          }
+        }
+      });
+    } finally { checking = false; }
+  };
+  const pollTimer = setInterval(tick, 1500);
+  const heartbeatTimer = setInterval(() => { if (!closed && !res.writableEnded) res.write(': heartbeat\n\n'); }, 15000);
+  tick();
+  req.on('close', () => {
+    closed = true;
+    clearInterval(pollTimer);
+    clearInterval(heartbeatTimer);
+  });
+});
+
 app.get('/api/tasks/recent', (req, res) => {
   const base = `${req.protocol}://${req.get('host')}`;
   const tasks = wallet.recentTasks(req.query.limit).map(item => ({

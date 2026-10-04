@@ -2432,6 +2432,7 @@ splitGrid=async function(n){
   async function runRealGeneration(task,node){
     const controller=new AbortController();
     realAbortControllers.set(task.id,controller);
+    node.__kaiLivePolling=true;
     const started=Date.now();
     task.startedAt=task.startedAt||started;
     task.status='running';task.phase='uploading';task.note=task.model==='test-image'?'启动本地 Mock…':'连接图片服务…';
@@ -2492,6 +2493,7 @@ splitGrid=async function(n){
       note((task.model==='test-image'?'Mock：':task.provider==='otterl'?'OtterL：':'图片服务：')+task.errorReason);
     }finally{
       realAbortControllers.delete(task.id);
+      node.__kaiLivePolling=false;
       window.KAI_WALLET?.refresh();
     }
   }
@@ -2863,7 +2865,7 @@ splitGrid=async function(n){
 
   async function recoverKieTasks({manual=false,quiet=false}={}){
     const allGenerationNodes=[...document.querySelectorAll('.generation-node')];
-    const emptyNodes=allGenerationNodes.filter(node=>!node.querySelector('.uploaded-image'));
+    const emptyNodes=allGenerationNodes.filter(node=>!node.querySelector('.uploaded-image')&&!node.__kaiLivePolling);
     const claimed=new Set();
     allGenerationNodes.forEach(node=>savedProviderTasks(node).forEach(x=>claimed.add(x.taskId)));
     const recoveries=[];
@@ -2926,7 +2928,71 @@ splitGrid=async function(n){
   };
   setTimeout(recoverKieTasks,900);
   setTimeout(recoverAgentResults,1100);
-  window.KAI_TASK_RECOVERY={recoverAll:()=>Promise.all([recoverKieTasks({manual:true,quiet:true}),recoverAgentResults({manual:true})])};
+  let taskEventSource=null;
+  let taskStreamSignature='';
+  let backgroundSyncBusy=false;
+  let backgroundSyncQueued=false;
+
+  function currentTaskBindings(){
+    const images=[];
+    document.querySelectorAll('.generation-node').forEach(node=>{
+      if(node.querySelector('.uploaded-image'))return;
+      savedProviderTasks(node).forEach(item=>images.push({taskId:item.taskId,taskApi:item.taskApi||'market'}));
+    });
+    const agents=[...document.querySelectorAll('.agent-node')]
+      .filter(node=>!String(node.dataset.outputText||'').trim()&&node.dataset.agentRequestId)
+      .map(node=>node.dataset.agentRequestId);
+    const imageMap=new Map(images.map(item=>[item.taskId,item]));
+    return{images:[...imageMap.values()],agents:[...new Set(agents)]};
+  }
+
+  async function syncCurrentCanvas(){
+    if(backgroundSyncBusy){backgroundSyncQueued=true;return}
+    backgroundSyncBusy=true;
+    try{
+      await Promise.all([recoverKieTasks({manual:true,quiet:true}),recoverAgentResults({manual:true})]);
+    }catch(error){
+      if(navigator.onLine)console.warn('当前画布任务自动同步失败',error);
+    }finally{
+      backgroundSyncBusy=false;
+      refreshTaskStream();
+      if(backgroundSyncQueued){backgroundSyncQueued=false;setTimeout(syncCurrentCanvas,80)}
+    }
+  }
+
+  function refreshTaskStream(){
+    const bindings=currentTaskBindings();
+    const signature=JSON.stringify(bindings);
+    if(signature===taskStreamSignature&&taskEventSource)return;
+    taskEventSource?.close();taskEventSource=null;taskStreamSignature=signature;
+    if(!bindings.images.length&&!bindings.agents.length)return;
+    const params=new URLSearchParams({images:JSON.stringify(bindings.images),agents:JSON.stringify(bindings.agents)});
+    const source=new EventSource('/api/tasks/stream?'+params.toString());
+    taskEventSource=source;
+    source.onmessage=event=>{
+      let update={};try{update=JSON.parse(event.data||'{}')}catch{return}
+      if(update.kind==='image'){
+        document.querySelectorAll('.generation-node').forEach(node=>{
+          if(savedProviderTasks(node).some(item=>item.taskId===update.taskId)&&!node.querySelector('.uploaded-image')){
+            if(update.state==='generating')setNodeStatus(node,'running','生成中');
+            else if(['waiting','queuing'].includes(update.state))setNodeStatus(node,'running','排队中');
+          }
+        });
+      }
+      if(['success','fail','charged','released'].includes(update.state))syncCurrentCanvas();
+    };
+    source.onerror=()=>{ /* EventSource 会自动重连，3 秒补查同时兜底。 */ };
+  }
+
+  const fallbackSyncTimer=setInterval(()=>{
+    refreshTaskStream();
+    if(!document.hidden&&navigator.onLine)syncCurrentCanvas();
+  },3000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){refreshTaskStream();syncCurrentCanvas()}});
+  window.addEventListener('online',()=>{refreshTaskStream();syncCurrentCanvas()});
+  window.addEventListener('beforeunload',()=>{taskEventSource?.close();clearInterval(fallbackSyncTimer)});
+  setTimeout(()=>{refreshTaskStream();syncCurrentCanvas()},1300);
+  window.KAI_TASK_RECOVERY={recoverAll:()=>Promise.all([recoverKieTasks({manual:true,quiet:true}),recoverAgentResults({manual:true})]),syncNow:syncCurrentCanvas};
 })();
 
 </script>
