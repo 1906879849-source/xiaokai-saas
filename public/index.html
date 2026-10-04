@@ -512,6 +512,7 @@
     @media(max-width:760px){.workflow-library{padding:10px}.workflow-library-shell{height:calc(100vh - 20px)}.workflow-library-head{padding:0 14px}.workflow-library-search{width:180px}.workflow-upload{display:none}.workflow-grid{grid-template-columns:1fr}}
 
 </style>
+<link rel="stylesheet" href="canvas-features.css">
 </head>
 <body>
 <main class="app">
@@ -521,9 +522,6 @@
       <button class="tool on" title="拖动图片"><svg viewBox="0 0 24 24"><path d="M8 12V7a2 2 0 014 0v5-7a2 2 0 014 0v7-5a2 2 0 014 0v7-3a2 2 0 014 0v5c0 3-2 5-5 5h-2c-2 0-3-1-4-3l-2-4a2 2 0 013-2l2 2V9a2 2 0 014 0"/></svg></button>
       <button class="tool" title="文字"><svg viewBox="0 0 24 24"><path d="M5 5h14M12 5v14M8 19h8"/></svg></button>
       <button class="tool" title="图片"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M4 17l5-5 4 4 2-2 5 4"/></svg></button>
-      <button class="tool" title="视频"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="14" rx="2"/><path d="M17 10l4-2v8l-4-2"/></svg></button>
-      <button class="tool" title="音频"><svg viewBox="0 0 24 24"><path d="M4 10v4m4-7v10m4-13v16m4-12v8m4-6v4"/></svg></button>
-      <button class="tool" title="时间线"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/></svg></button>
       <button class="tool" id="workflowLibraryButton" title="工作流" aria-label="工作流"><svg viewBox="0 0 24 24"><path d="M12 3L3.5 8 12 13l8.5-5L12 3z"/><path d="M5.5 12L12 16l6.5-4M5.5 16L12 20l6.5-4"/></svg></button>
       <button class="tool" title="Agent"><svg viewBox="0 0 24 24"><path d="M8 5h8a4 4 0 014 4v4a4 4 0 01-4 4h-3l-4 3v-3H8a4 4 0 01-4-4V9a4 4 0 014-4z"/><path d="M9 11h.01M15 11h.01"/></svg></button>
       <div class="divider"></div>
@@ -538,7 +536,6 @@
     </svg>
     <article class="node n1" id="n1"><div class="node-actions"><button data-tool="expand">扩图</button><button data-tool="cutout">抠图</button><button data-tool="multi">多角度</button><div class="node-tools-wrap"><button class="tools-toggle">⌘ 工具⌃</button><div class="node-tools-menu"><button data-tool="erase"><span class="tool-ico">◒</span>消除笔</button><button data-tool="crop"><span class="tool-ico">⌗</span>构图裁剪</button><button data-tool="grid"><span class="tool-ico">▦</span>宫格切分</button></div></div><button data-tool="download">↓</button></div><div class="node-label">▧　参考图</div><div class="card"><div class="art"></div></div><button class="plus">+</button></article>
     <article class="node n2" id="n2"><div class="node-actions"><button data-tool="expand">扩图</button><button data-tool="cutout">抠图</button><button data-tool="multi">多角度</button><div class="node-tools-wrap"><button class="tools-toggle">⌘ 工具⌃</button><div class="node-tools-menu"><button data-tool="erase"><span class="tool-ico">◒</span>消除笔</button><button data-tool="crop"><span class="tool-ico">⌗</span>构图裁剪</button><button data-tool="grid"><span class="tool-ico">▦</span>宫格切分</button></div></div><button data-tool="download">↓</button></div><div class="node-label">▧　生成图 1</div><div class="card"><div class="art pink"></div></div><button class="plus">+</button></article>
-    <article class="node n3" id="n3"><div class="node-actions"><button class="accent">✦ 智能高清</button><button>提取帧</button><button>补帧</button><button>修剪</button><button>•••</button></div><div class="node-label">▣　视频 1</div><div class="card landscape"><div class="art video-art"></div><div class="video-play">▶</div><div class="video-meta"><span>◖</span><div class="video-track"></div><span>00:08</span></div></div><button class="plus">+</button></article>
     <article class="node n4" id="n4"><div class="node-actions"><button data-tool="expand">扩图</button><button data-tool="cutout">抠图</button><button data-tool="multi">多角度</button><div class="node-tools-wrap"><button class="tools-toggle">⌘ 工具⌃</button><div class="node-tools-menu"><button data-tool="erase"><span class="tool-ico">◒</span>消除笔</button><button data-tool="crop"><span class="tool-ico">⌗</span>构图裁剪</button><button data-tool="grid"><span class="tool-ico">▦</span>宫格切分</button></div></div><button data-tool="download">↓</button></div><div class="node-label">▧　图片组</div><div class="card landscape"><div class="art pink"></div></div><button class="plus">+</button></article>
     <section class="dock" id="dock">
       <div class="selection"><span class="thumb"></span><b id="selectedName">已选择：图片</b><button class="clear" id="clear">×</button></div>
@@ -583,7 +580,7 @@
       </div>
     </section>
     </div>
-    <div class="context-menu" id="contextMenu"><button data-action="Agent 对话">Agent 对话</button><button data-action="生图">生图</button><button data-action="视频">视频</button><button data-action="文字">文字节点</button><button data-action="分组">分组框</button><button data-action="取消分组">取消分组</button><button data-action="图片对比">图片对比节点</button></div>
+    <div class="context-menu" id="contextMenu"><button data-action="Agent 对话">Agent 对话</button><button data-action="空白图片">空白图片节点</button><button data-action="生图">生图</button><button data-action="文字">文字节点</button><button data-action="分组">分组框</button><button data-action="取消分组">取消分组</button><button data-action="图片对比">图片对比节点</button></div>
     <div class="edge-menu" id="edgeMenu"><button data-edge-action="earlier">↑　输入顺序前移</button><button data-edge-action="later">↓　输入顺序后移</button><button data-edge-action="insert">＋　在线上插入文字节点</button><button class="danger" data-edge-action="delete">×　删除这条连线</button></div>
     <input id="imageUpload" type="file" accept="image/*" multiple hidden>
     <div class="marquee" id="marquee"></div>
@@ -679,10 +676,10 @@
       </section>
       <input id="workflowPresetFile" type="file" accept=".json,.xiaokai" hidden>
     </div>
-    <aside class="agent" id="agent"><header class="agent-head"><b>xiaokai Agent</b><button class="close" id="close">×</button></header><div class="models"><button class="model on">GPT</button><button class="model">Gemini</button><button class="model">即梦</button></div><div class="skill-strip"><button class="skill-load" id="skillLoad">＋ 加载 Skill</button><div class="skill-state"><b id="skillName">未加载 Skill</b><span>支持 SKILL.md 或 ZIP 文件</span></div><input id="skillFile" type="file" accept=".md,.zip" hidden></div><div class="chat"><div class="msg user">参考这张图片，生成同款构图。</div><div class="msg">可以。选中画布图片后告诉我修改要求即可。</div></div><div class="agent-input"><textarea placeholder="告诉 Agent 你想做什么……"></textarea></div></aside>
+    <aside class="agent" id="agent"><header class="agent-head"><b>xiaokai Agent</b><button class="close" id="close">×</button></header><div class="models"><button class="model on">GPT</button><button class="model">Gemini</button><button class="model">即梦</button></div><div class="skill-strip"><button class="skill-load" id="skillLoad">＋ 加载 Skill</button><div class="skill-state"><b id="skillName">未加载 Skill</b><span>支持 SKILL.md 文件</span></div><input id="skillFile" type="file" accept=".md" hidden></div><div class="chat"><div class="msg user">参考这张图片，生成同款构图。</div><div class="msg">可以。选中画布图片后告诉我修改要求即可。</div></div><div class="agent-input"><textarea placeholder="告诉 Agent 你想做什么……"></textarea></div></aside>
     <div class="image-preview" id="imagePreview" role="dialog" aria-modal="true" aria-label="图片大图预览"><button class="preview-close" id="previewClose" aria-label="关闭预览">×</button><div class="preview-panel"><div class="preview-stage" id="previewStage"></div><div class="preview-caption" id="previewCaption"></div><div class="preview-info" id="previewInfo"></div><div class="preview-note" id="previewNote"><span class="preview-area-chip" id="previewAreaChip">1 区域</span><input id="previewNoteInput" placeholder="描述你想要如何修改这个区域"><button id="previewNoteSave" title="生成标注副本">✓</button><button id="previewNoteDelete" title="取消当前标注">⌫</button></div><div class="preview-toolbar"><button data-preview-action="minus">－</button><b id="previewZoom">100%</b><button data-preview-action="plus">＋</button><button data-preview-action="fit">适应</button><button data-preview-action="mark">⌖ 区域标注</button><button data-preview-action="original">原图</button><button data-preview-action="2k">导出 2K</button><button data-preview-action="4k">导出 4K</button></div></div></div>
     <aside class="side-drawer" id="assetDrawer"><div class="drawer-head"><b>素材库</b><button data-close-drawer>×</button></div><div class="drawer-tools"><input id="assetSearch" placeholder="搜索素材名称"><button id="assetAdd">＋ 添加</button></div><div class="drawer-list asset-grid" id="assetList"></div><input id="assetFiles" type="file" accept="image/*" multiple hidden></aside>
-    <aside class="side-drawer" id="skillDrawer"><div class="drawer-head"><b>常用 Skill 库</b><button data-close-drawer>×</button></div><div class="drawer-tools"><input id="skillSearch" placeholder="搜索名称或内容"><button id="skillAdd">＋ 导入</button></div><div class="drawer-list" id="skillList"></div><input id="skillLibraryFiles" type="file" accept=".md,.txt,.zip" multiple hidden></aside>
+    <aside class="side-drawer" id="skillDrawer"><div class="drawer-head"><b>常用 Skill 库</b><button data-close-drawer>×</button></div><div class="drawer-tools"><input id="skillSearch" placeholder="搜索名称或内容"><button id="skillAdd">＋ 导入</button></div><div class="drawer-list" id="skillList"></div><input id="skillLibraryFiles" type="file" accept=".md,.txt" multiple hidden></aside>
     <aside class="side-drawer" id="managerDrawer"><div class="drawer-head"><b id="managerTitle">我的画布</b><button data-close-drawer>×</button></div><div class="drawer-list" id="managerList" style="padding-top:12px"></div></aside>
     <input id="workflowImport" type="file" accept=".json,.xiaokai" hidden>
     <div class="tool-editor" id="toolEditor" role="dialog" aria-modal="true"><div class="editor-shell"><div class="editor-head"><b id="editorTitle">图片编辑</b><button id="editorClose">×</button></div><div class="editor-body"><canvas id="editorCanvas"></canvas></div><div class="editor-foot" id="editorControls"><div class="brush-control" id="brushControl">画笔大小 <input id="brushSize" type="range" min="8" max="140" value="48"></div><div id="cropControls" hidden><button data-ratio="free" class="on">自由</button><button data-ratio="1">1:1</button><button data-ratio="1.3333">4:3</button><button data-ratio="1.7778">16:9</button><button data-ratio="0.75">3:4</button><button data-ratio="0.5625">9:16</button></div><button id="editorCancel">取消</button><button class="apply" id="editorApply">应用</button></div></div></div>
@@ -813,7 +810,7 @@
   function bindAgentNode(article){
     const skill=article.querySelector('.agent-skill'),file=article.querySelector('.agent-skill-file');
     if(skill&&file){
-      readSkills().then(list=>list.forEach(item=>{if(![...skill.options].some(o=>o.text===item.name))skill.add(new Option(item.name,item.name))}));
+      readSkills().then(list=>list.filter(item=>item.content!=='ZIP Skill 文件').forEach(item=>{if(![...skill.options].some(o=>o.text===item.name))skill.add(new Option(item.name,item.name))}));
       skill.onchange=()=>{if(skill.value==='加载 Skill 文件…')file.click();scheduleSave()};
       file.onchange=async()=>{
         const selected=file.files[0];if(!selected)return;
@@ -828,7 +825,7 @@
     article.querySelectorAll('select').forEach(s=>{bindFieldHistory(s);s.addEventListener('change',scheduleSave)});
     if(runButton)runButton.onclick=e=>{e.stopPropagation();note('Agent 节点已就绪，配置模型 API 后即可运行')}
   }
-  function createAgentNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom){const article=document.createElement('article');article.className='node agent-node';article.id='agent-'+Date.now();article.style.left=x+'px';article.style.top=y+'px';article.innerHTML='<div class="node-label">✦　自定义代理</div><div class="card agent-card"><div class="agent-node-head"><b>Agent 工作流</b><select class="agent-model"><option>GPT 5.5 Compact · Instant</option><option>GPT 5.5 · Thinking</option><option>GPT 5.6 SOL · Pro</option><option>Gemini 3.1 Flash Lite</option><option>Gemini 3 Flash Thinking</option><option>Gemini 3.1 Pro High</option></select><select class="agent-skill"><option>无 Skill</option><option>加载 Skill 文件…</option></select><input class="agent-skill-file" type="file" accept=".md,.zip" hidden></div><div class="agent-fields"><div class="agent-field"><label>元提示词</label><textarea placeholder="设定身份、风格和工作规则……"></textarea></div><div class="agent-field"><label>用户需求</label><textarea placeholder="输入任务，或通过连线、@ 引用图片……"></textarea></div><div class="agent-output"><label>输出内容</label><select><option>输出文字</option><option>生成图片</option><option>生成视频</option></select></div></div><button class="agent-run">运行 Agent</button></div><button class="plus">+</button>';world.appendChild(article);nodes.push(article);bindNode(article);bindAgentNode(article);selectNode(article);commitHistory({undo:()=>article.remove(),redo:()=>{world.appendChild(article);selectNode(article)}});return article}
+  function createAgentNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom){const article=document.createElement('article');article.className='node agent-node';article.id='agent-'+Date.now();article.style.left=x+'px';article.style.top=y+'px';article.innerHTML='<div class="node-label">✦　自定义代理</div><div class="card agent-card"><div class="agent-node-head"><b>Agent 工作流</b><select class="agent-model"><option>GPT 5.5 Compact · Instant</option><option>GPT 5.5 · Thinking</option><option>GPT 5.6 SOL · Pro</option><option>Gemini 3.1 Flash Lite</option><option>Gemini 3 Flash Thinking</option><option>Gemini 3.1 Pro High</option></select><select class="agent-skill"><option>无 Skill</option><option>加载 Skill 文件…</option></select><input class="agent-skill-file" type="file" accept=".md" hidden></div><div class="agent-fields"><div class="agent-field"><label>元提示词</label><textarea placeholder="设定身份、风格和工作规则……"></textarea></div><div class="agent-field"><label>用户需求</label><textarea placeholder="输入任务，或通过连线、@ 引用图片……"></textarea></div><div class="agent-output"><label>输出内容</label><select><option>输出文字</option></select></div></div><button class="agent-run">运行 Agent</button></div><button class="plus">+</button>';world.appendChild(article);nodes.push(article);bindNode(article);bindAgentNode(article);selectNode(article);commitHistory({undo:()=>article.remove(),redo:()=>{world.appendChild(article);selectNode(article)}});return article}
   function createTextNode(kind='text',x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom,value='',record=true){const n=document.createElement('article');n.className='node '+(kind==='note'?'note-node':'text-node');n.id=kind+'-'+Date.now()+'-'+Math.random().toString(16).slice(2);n.style.left=x+'px';n.style.top=y+'px';n.innerHTML='<div class="node-label">'+(kind==='note'?'▤　便签':'T　文字')+'</div><div class="card text-card"><textarea placeholder="'+(kind==='note'?'记录想法……':'输入或粘贴文字')+'"></textarea></div><button class="plus">+</button>';n.querySelector('textarea').value=value;world.appendChild(n);nodes.push(n);bindNode(n);n.querySelector('textarea').oninput=scheduleSave;selectNode(n);if(record)commitHistory({undo:()=>n.remove(),redo:()=>world.appendChild(n)});return n}
   function createGroupNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom,width=560,height=390){const n=document.createElement('article');n.className='node group-node';n.id='group-'+Date.now();n.style.left=x+'px';n.style.top=y+'px';n.innerHTML='<div class="node-label">⌗　节点组</div><div class="card group-card"></div><button class="plus">+</button>';const card=n.querySelector('.group-card');card.style.width=width+'px';card.style.height=height+'px';world.appendChild(n);nodes.unshift(n);bindNode(n);selectNode(n);commitHistory({undo:()=>n.remove(),redo:()=>world.appendChild(n)});return n}
   function bindCompareNode(n){const slider=n.querySelector('.compare-slider');if(slider)slider.oninput=()=>{const value=slider.value;n.querySelector('.compare-top').style.clipPath=`inset(0 ${100-value}% 0 0)`;n.querySelector('.compare-divider').style.left=value+'%'}}
@@ -3240,7 +3237,7 @@ splitGrid=async function(n){
   renderSkills=async function(){
     const query=document.getElementById('skillSearch').value.trim().toLowerCase();
     const all=await readSkills();
-    const list=all.filter(item=>(item.name+' '+item.content).toLowerCase().includes(query));
+    const list=all.filter(item=>item.content!=='ZIP Skill 文件'&&(item.name+' '+item.content).toLowerCase().includes(query));
     const root=document.getElementById('skillList');root.replaceChildren();
     list.forEach(item=>{
       const row=document.createElement('div');row.className='list-card';
@@ -3528,7 +3525,7 @@ splitGrid=async function(n){
     return result;
   };
 
-  function runnable(node){return node?.isConnected&&(node.classList.contains('agent-node')||node.classList.contains('generation-node')||Boolean(node.querySelector('.video-art')))}
+  function runnable(node){return node?.isConnected&&(node.classList.contains('agent-node')||node.classList.contains('generation-node'))}
   function latestWorkflowNodes(){
     const grouped=new Map();
     nodes.forEach(node=>{const key=node.dataset.workflowInstance;if(!key)return;const item=grouped.get(key)||{time:0,nodes:[]};item.time=Math.max(item.time,Number(node.dataset.workflowImportedAt)||0);item.nodes.push(node);grouped.set(key,item)});
@@ -3549,7 +3546,7 @@ splitGrid=async function(n){
   function runWholeWorkflow(){
     if(workflowQueue.some(task=>task.status==='pending'||task.status==='running'))return note('任务队列正在运行，请等待完成或先取消任务');
     const targets=orderedWorkflowNodes(latestWorkflowNodes());
-    if(!targets.length)return note('当前工作流中没有可运行的 Agent、生图或视频节点');
+    if(!targets.length)return note('当前工作流中没有可运行的 Agent 或生图节点');
     const workflowRunId='whole-'+Date.now();
     targets.forEach(node=>queueNodeExecution(node,{workflowRunId}));
     note('已按连线顺序加入整套工作流，共 '+targets.length+' 个任务');
@@ -3558,4 +3555,5 @@ splitGrid=async function(n){
   if(actions&&!document.getElementById('runWholeWorkflow')){const button=document.createElement('button');button.id='runWholeWorkflow';button.textContent='运行工作流';button.title='按节点连线顺序一次运行当前整套工作流';button.onclick=runWholeWorkflow;actions.prepend(button)}
 })();
 </script>
+<script src="canvas-features.js"></script>
 </body></html>
