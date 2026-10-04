@@ -1,0 +1,83 @@
+/* Hide capabilities that do not have a production backend yet. */
+.rail .tool[title="视频"],
+.rail .tool[title="音频"],
+.rail .tool[title="时间线"],
+#contextMenu [data-action="视频"],
+.video-node,
+.node:has(.video-art) {
+  display: none !important;
+}
+
+.blank-image-card {
+  width: 300px;
+  height: 320px;
+  overflow: hidden;
+  border: 1px dashed #3e6b96;
+  background: linear-gradient(145deg, rgba(19, 36, 56, .92), rgba(13, 20, 31, .96));
+}
+
+.blank-image-card .blank-image-upload {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-content: center;
+  gap: 10px;
+  border: 0;
+  background: transparent;
+  color: #dcecff;
+  cursor: pointer;
+  text-align: center;
+}
+
+.blank-image-card .blank-image-upload:hover {
+  background: rgba(72, 151, 235, .08);
+}
+
+.blank-image-card .blank-image-icon {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 4px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(46, 145, 255, .14);
+  color: #56a8ff;
+  font-size: 27px;
+}
+
+.blank-image-card .blank-image-upload b {
+  font-size: 16px;
+}
+
+.blank-image-card .blank-image-upload small {
+  color: #8296aa;
+  font-size: 12px;
+}
+
+.blank-image-card > .uploaded-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #11151b;
+}
+
+.blank-image-node[data-image-slot-state="empty"] .node-label::after {
+  content: " · 等待上传";
+  color: #6d9fd0;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.operation-node-badge {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  left: 10px;
+  padding: 5px 9px;
+  border: 1px solid rgba(101, 174, 255, .42);
+  border-radius: 999px;
+  background: rgba(13, 22, 34, .85);
+  color: #8fc6ff;
+  font-size: 11px;
+  pointer-events: none;
+}
