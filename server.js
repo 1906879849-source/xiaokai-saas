@@ -597,9 +597,12 @@ app.use('/generated', express.static(GENERATED_DIR, { maxAge: '7d' }));
 app.use(express.static(PUBLIC_DIR));
 app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
-const HOST = process.env.HOST || '127.0.0.1';
+// Railway and other container platforms must listen on every network interface.
+// Binding to 0.0.0.0 also works locally and prevents a stale HOST=127.0.0.1
+// environment value from making the deployed service unreachable.
+const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
-  console.log(`\nxiaokai Kie V1 已启动： http://127.0.0.1:${PORT}`);
+  console.log(`\nxiaokai Kie V1 已启动： http://${HOST}:${PORT}`);
   console.log(`Kie Key：${process.env.KIE_API_KEY ? '已配置' : '未配置（请编辑 .env）'}`);
   console.log(`OtterL Key：${process.env.OTTERL_API_KEY ? '已配置' : '未配置（自动继续使用 KIE）'}`);
   console.log(`图片线路：${preferredImageProvider()}`);
