@@ -685,7 +685,7 @@
     <aside class="agent" id="agent"><header class="agent-head"><b>xiaokai Agent</b><button class="close" id="close">×</button></header><div class="models"><button class="model on">GPT</button><button class="model">Gemini</button><button class="model">即梦</button></div><div class="skill-strip"><button class="skill-load" id="skillLoad">＋ 加载 Skill</button><div class="skill-state"><b id="skillName">未加载 Skill</b><span>支持 SKILL.md 文件</span></div><input id="skillFile" type="file" accept=".md" hidden></div><div class="chat"><div class="msg user">参考这张图片，生成同款构图。</div><div class="msg">可以。选中画布图片后告诉我修改要求即可。</div></div><div class="agent-input"><textarea placeholder="告诉 Agent 你想做什么……"></textarea></div></aside>
     <div class="image-preview" id="imagePreview" role="dialog" aria-modal="true" aria-label="图片大图预览"><button class="preview-close" id="previewClose" aria-label="关闭预览">×</button><div class="preview-panel"><div class="preview-stage" id="previewStage"></div><div class="preview-caption" id="previewCaption"></div><div class="preview-info" id="previewInfo"></div><div class="preview-note" id="previewNote"><span class="preview-area-chip" id="previewAreaChip">1 区域</span><input id="previewNoteInput" placeholder="描述你想要如何修改这个区域"><button id="previewNoteSave" title="生成标注副本">✓</button><button id="previewNoteDelete" title="取消当前标注">⌫</button></div><div class="preview-toolbar"><button data-preview-action="minus">－</button><b id="previewZoom">100%</b><button data-preview-action="plus">＋</button><button data-preview-action="fit">适应</button><button data-preview-action="mark">⌖ 区域标注</button><button data-preview-action="original">原图</button><button data-preview-action="2k">导出 2K</button><button data-preview-action="4k">导出 4K</button></div></div></div>
     <aside class="side-drawer" id="assetDrawer"><div class="drawer-head"><b>素材库</b><button data-close-drawer>×</button></div><div class="drawer-tools"><input id="assetSearch" placeholder="搜索素材名称"><button id="assetAdd">＋ 添加</button></div><div class="drawer-list asset-grid" id="assetList"></div><input id="assetFiles" type="file" accept="image/*" multiple hidden></aside>
-    <aside class="side-drawer" id="skillDrawer"><div class="drawer-head"><b>常用 Skill 库</b><button data-close-drawer>×</button></div><div class="drawer-tools"><input id="skillSearch" placeholder="搜索名称或内容"><button id="skillAdd">＋ 导入</button></div><div class="drawer-list" id="skillList"></div><input id="skillLibraryFiles" type="file" accept=".md,.txt" multiple hidden></aside>
+    <aside class="side-drawer" id="skillDrawer"><div class="drawer-head"><b>统一 Skill 库</b><button data-close-drawer>×</button></div><div class="drawer-tools"><input id="skillSearch" placeholder="搜索名称或内容"><button id="skillAdd">＋ 导入</button></div><div class="drawer-list" id="skillList"></div><input id="skillLibraryFiles" type="file" accept=".md,.txt" multiple hidden></aside>
     <aside class="side-drawer" id="managerDrawer"><div class="drawer-head"><b id="managerTitle">我的画布</b><button data-close-drawer>×</button></div><div class="drawer-list" id="managerList" style="padding-top:12px"></div></aside>
     <input id="workflowImport" type="file" accept=".json,.xiaokai" hidden>
     <div class="tool-editor" id="toolEditor" role="dialog" aria-modal="true"><div class="editor-shell"><div class="editor-head"><b id="editorTitle">图片编辑</b><button id="editorClose">×</button></div><div class="editor-body"><canvas id="editorCanvas"></canvas></div><div class="editor-foot" id="editorControls"><div class="brush-control" id="brushControl">画笔大小 <input id="brushSize" type="range" min="8" max="140" value="48"></div><div id="cropControls" hidden><button data-ratio="free" class="on">自由</button><button data-ratio="1">1:1</button><button data-ratio="1.3333">4:3</button><button data-ratio="1.7778">16:9</button><button data-ratio="0.75">3:4</button><button data-ratio="0.5625">9:16</button></div><button id="editorCancel">取消</button><button class="apply" id="editorApply">应用</button></div></div></div>
@@ -3225,9 +3225,27 @@ splitGrid=async function(n){
   function isUsableSkill(name){return name&&name!=='无 Skill'&&name!=='加载 Skill 文件…'}
   function shortName(name){return name.length>18?name.slice(0,16)+'…':name}
   function canUseSkill(node){return !!(node?.isConnected&&(node.classList.contains('generation-node')||node.classList.contains('video-node')||node.querySelector('.video-art')||node.classList.contains('agent-node')))}
+  async function syncSkillConsumers(list){
+    const seen=new Set();
+    const skills=(list||await readSkills()).filter(item=>item?.name&&item.content!=='ZIP Skill 文件'&&!seen.has(item.name)&&seen.add(item.name));
+    const names=new Set(skills.map(item=>item.name));
+    document.querySelectorAll('.agent-node').forEach(node=>{
+      const select=node.querySelector('.agent-skill');if(!select)return;
+      const current=cleanSkillName(node.dataset.skillName||select.value||'');
+      [...select.options].filter(option=>isUsableSkill(option.value)).forEach(option=>option.remove());
+      skills.forEach(item=>select.add(new Option(item.name,item.name)));
+      if(names.has(current))select.value=current;
+      else if(current==='加载 Skill 文件…')select.value=current;
+      else{select.value='无 Skill';delete node.dataset.skillName;delete node.dataset.skillContent}
+      updateAgentSkillState(node);
+    });
+    const active=skills.find(item=>item.name===document.getElementById('skillName')?.textContent);
+    if(!active&&document.getElementById('skillName'))document.getElementById('skillName').textContent='未加载 Skill';
+    return skills;
+  }
   function resolveSkillTarget(){
-    if(canUseSkill(skillTargetNode))return skillTargetNode;
     if(canUseSkill(selectedNode))return selectedNode;
+    if(canUseSkill(skillTargetNode))return skillTargetNode;
     const selectedCard=document.querySelector('.node .card.selected,.node .card.multi-selected');
     const cardNode=selectedCard?.closest('.node');
     if(canUseSkill(cardNode))return cardNode;
@@ -3267,8 +3285,9 @@ splitGrid=async function(n){
     const select=node.querySelector('.agent-skill');
     if(select&&!select.dataset.skillStateBound){
       select.dataset.skillStateBound='1';
-      select.addEventListener('change',()=>{updateAgentSkillState(node);scheduleSave()});
+      select.addEventListener('change',async()=>{const name=cleanSkillName(select.value);const item=(await readSkills()).find(skill=>skill.name===name);if(item){node.dataset.skillName=item.name;node.dataset.skillContent=item.content||'';document.getElementById('skillName').textContent=item.name}else if(name==='无 Skill'){delete node.dataset.skillName;delete node.dataset.skillContent}updateAgentSkillState(node);scheduleSave()});
     }
+    readSkills().then(syncSkillConsumers);
     updateAgentSkillState(node);
     setTimeout(()=>updateAgentSkillState(node),250);
   }
@@ -3283,6 +3302,7 @@ splitGrid=async function(n){
       if(select&&! [...select.options].some(option=>option.value===item.name))select.add(new Option(item.name,item.name));
       if(select)select.value=item.name;
       target.dataset.skillName=item.name;
+      target.dataset.skillContent=item.content||'';
       updateAgentSkillState(target);
       selectNode(target,false,true);
       note('已把 '+item.name+' 应用到当前 Agent');
@@ -3304,6 +3324,7 @@ splitGrid=async function(n){
   renderSkills=async function(){
     const query=document.getElementById('skillSearch').value.trim().toLowerCase();
     const all=await readSkills();
+    await syncSkillConsumers(all);
     const list=all.filter(item=>item.content!=='ZIP Skill 文件'&&(item.name+' '+item.content).toLowerCase().includes(query));
     const root=document.getElementById('skillList');root.replaceChildren();
     list.forEach(item=>{
@@ -3312,11 +3333,14 @@ splitGrid=async function(n){
       row.querySelector('b').textContent=item.name;
       row.querySelector('small').textContent=item.content.slice(0,80)||'Skill 文件';
       row.querySelector('[data-use]').onclick=()=>applySkill(item);
-      row.querySelector('[data-del]').onclick=async()=>{await dbWrite('skill-library',all.filter(x=>x.id!==item.id));renderSkills()};
+      row.querySelector('[data-del]').onclick=async()=>{const next=all.filter(x=>x.id!==item.id);await dbWrite('skill-library',next);await syncSkillConsumers(next);renderSkills()};
       root.appendChild(row);
     });
     if(!list.length)root.innerHTML='<div class="empty-state">还没有常用 Skill</div>';
   };
+  const priorAddSkills=addSkills;
+  addSkills=async function(files){await priorAddSkills(files);await syncSkillConsumers()};
+  document.getElementById('skillFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;await addSkills([file]);document.getElementById('skillName').textContent=file.name;const item=(await readSkills()).find(skill=>skill.name===file.name);if(item)await applySkill(item);e.target.value='';note('Skill 已同步到统一库，AI 对话和生图节点都可以调用')};
   document.getElementById('skillSearch').oninput=renderSkills;
   if(skillButton)skillButton.onclick=e=>{
     e.stopPropagation();
