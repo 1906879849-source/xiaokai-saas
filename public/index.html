@@ -1201,12 +1201,13 @@ function readNodePayload(n,index=0){if(!n?.isConnected)return null;const label=s
 function collectInputPayload(target){const items=incomingNodes(target).map((source,index)=>readNodePayload(source,index)).filter(Boolean);return{items,texts:items.filter(x=>x.kind==='text'),images:items.filter(x=>x.kind==='image')}}
 function renderDockVariablesFor(node){if(!dockVariablesEl)return;const payload=node?collectInputPayload(node):{items:[]};dockVariablesEl.replaceChildren();if(!payload.items.length){dockVariablesEl.hidden=true;return}payload.items.forEach(item=>{const chip=document.createElement('div');chip.className='variable-chip';chip.innerHTML='<b></b><span></span>';chip.querySelector('b').textContent=item.label;chip.querySelector('span').textContent=item.kind==='image'?'图片变量':'文字变量';dockVariablesEl.appendChild(chip)});dockVariablesEl.hidden=false}
 function ensureAgentResult(article){let box=article.querySelector('.agent-result');if(!box){box=document.createElement('div');box.className='agent-result';box.hidden=true;article.querySelector('.agent-run')?.before(box)}return box}
+function removeAgentInlineOutput(node,{includeError=true}={}){const box=node?.querySelector('.agent-result');if(box&&(includeError||!box.classList.contains('error')))box.remove()}
 function syncPromptToSelectedNode(){if(selectedNode&&nodeSupportsDock(selectedNode)){selectedNode.dataset.promptHtml=promptBox.innerHTML;selectedNode.dataset.promptText=promptBox.value}}
 function loadPromptFromNode(n){if(!n||!nodeSupportsDock(n))return;promptBox.innerHTML=n.dataset.promptHtml||'';run.classList.toggle('ready',!!promptBox.value.trim())}
 function renderTaskQueue(){if(!taskQueueListEl||!taskQueueMetaEl)return;taskQueueListEl.replaceChildren();if(!workflowQueue.length){taskQueueMetaEl.textContent='空闲';const empty=document.createElement('div');empty.className='task-empty';empty.textContent='暂无任务';taskQueueListEl.appendChild(empty);return}const pending=workflowQueue.filter(t=>t.status==='pending').length;const running=workflowQueue.filter(t=>t.status==='running').length;taskQueueMetaEl.textContent=running?('运行中 '+running+' · 排队 '+pending):('待处理 '+pending+' · 历史 '+workflowQueue.length);workflowQueue.slice(-12).forEach(task=>{const row=document.createElement('div');row.className='task-queue-item '+task.status;row.innerHTML='<span class="task-dot"></span><div><b></b><small></small></div>';row.querySelector('b').textContent=task.name;row.querySelector('small').textContent=[task.type==='agent'?'Agent':'节点',{pending:'排队中',running:'运行中',done:'已完成',error:'失败'}[task.status]||task.status,task.note||''].filter(Boolean).join(' · ');taskQueueListEl.appendChild(row)})}
 function applyGenerationOutput(node,payload,resolvedPrompt){const card=node.querySelector('.card');if(!card)return;const firstImage=payload.images[0];const overlay=document.createElement('div');overlay.className='node-run-summary';overlay.textContent='变量 '+payload.items.length+' · '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})+(resolvedPrompt?' · '+resolvedPrompt.slice(0,42):'');if(firstImage){const img=document.createElement('img');img.className='uploaded-image';img.alt='生成结果预览';img.src=firstImage.value;card.replaceChildren(img,overlay)}else{const empty=document.createElement('div');empty.className='generation-empty';empty.innerHTML='<span>▧</span><small>'+(resolvedPrompt?resolvedPrompt.slice(0,80):'生成结果将在这里显示')+'</small>';card.replaceChildren(empty,overlay)}node.dataset.outputText=resolvedPrompt||'';bindNodeControls(node);updateCompareNodes();syncNodeChrome(node);wires()}
 function applyVideoOutput(node,payload){const meta=node.querySelector('.video-meta span:last-child');if(meta)meta.textContent='00:08';node.dataset.outputText='视频任务已根据 '+payload.items.length+' 个变量运行';}
-function applyAgentOutput(node,payload){const fields=[...node.querySelectorAll('textarea')];const metaPrompt=fields[0]?.value.trim()||'';const userNeed=fields[1]?.value.trim()||'';const result=['已接收 '+payload.items.length+' 个上游变量。',payload.texts.length?'文字变量：'+payload.texts.map(x=>x.label).join('、'):'',payload.images.length?'图片变量：'+payload.images.map(x=>x.label).join('、'):'',userNeed||metaPrompt||'等待进一步任务指令。'].filter(Boolean).join('\n');const box=ensureAgentResult(node);box.hidden=false;box.textContent=result;node.dataset.outputText=result}
+function applyAgentOutput(node,payload){const fields=[...node.querySelectorAll('textarea')];const metaPrompt=fields[0]?.value.trim()||'';const userNeed=fields[1]?.value.trim()||'';const result=['已接收 '+payload.items.length+' 个上游变量。',payload.texts.length?'文字变量：'+payload.texts.map(x=>x.label).join('、'):'',payload.images.length?'图片变量：'+payload.images.map(x=>x.label).join('、'):'',userNeed||metaPrompt||'等待进一步任务指令。'].filter(Boolean).join('\n');removeAgentInlineOutput(node);node.dataset.outputText=result}
 function executeWorkflowTask(task){const node=document.getElementById(task.nodeId);if(!node)return;const payload=collectInputPayload(node);if(node.classList.contains('agent-node'))applyAgentOutput(node,payload);else if(node.classList.contains('generation-node')){const base=(node.dataset.promptText||promptBox.value||'').trim();const extra=payload.texts.map(x=>'['+x.label+'] '+x.value).join('\n');const resolved=[base,extra].filter(Boolean).join('\n');applyGenerationOutput(node,payload,resolved)}else if(node.querySelector('.video-art'))applyVideoOutput(node,payload)}
 function processWorkflowQueue(){if(workflowActiveTask)return;const next=workflowQueue.find(t=>t.status==='pending');if(!next)return;const node=document.getElementById(next.nodeId);if(!node){next.status='error';next.note='节点不存在';renderTaskQueue();setTimeout(processWorkflowQueue,80);return}workflowActiveTask=next.id;next.status='running';next.note='正在执行';setNodeStatus(node,'running');renderTaskQueue();setTimeout(()=>{try{executeWorkflowTask(next);next.status='done';next.note='执行完成';setNodeStatus(node,'done')}catch(error){next.status='error';next.note=error.message||'执行失败';setNodeStatus(node,'error')}workflowActiveTask=null;renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,120)},node.classList.contains('agent-node')?650:900)}
 function queueNodeExecution(node){if(!node?.isConnected)return note('请先选择一个可运行节点');const type=node.classList.contains('agent-node')?'agent':node.querySelector('.video-art')?'video':node.classList.contains('generation-node')?'generation':null;if(!type)return note('当前节点暂不支持运行');if(type==='generation')syncPromptToSelectedNode();const task={id:'task-'+(++workflowTaskId),nodeId:node.id,name:strippedNodeName(node),type,status:'pending',note:'等待执行'};workflowQueue.push(task);setNodeStatus(node,'pending');renderTaskQueue();scheduleSave();processWorkflowQueue();note('已加入任务队列')}
@@ -1282,7 +1283,7 @@ applyAgentOutput=function(node,payload){
   const metaPrompt=fields[0]?.value.trim()||'';
   const userNeed=fields[1]?.value.trim()||'';
   const result=['已接收 '+payload.items.length+' 个上游变量。',payload.texts.length?'文字变量：'+payload.texts.map(x=>x.label).join('、'):'',payload.images.length?'图片变量：'+payload.images.map(x=>x.label).join('、'):'',userNeed||metaPrompt||'等待进一步任务指令。'].filter(Boolean).join('\n');
-  const box=ensureAgentResult(node);box.hidden=false;box.textContent=result;node.dataset.outputText=result;
+  removeAgentInlineOutput(node);node.dataset.outputText=result;
   pushAgentOutputDownstream(node,result);
 };
 
@@ -2789,7 +2790,7 @@ splitGrid=async function(n){
   function applyRecoveredAgentResult(node,item){
     const text=String(item?.text||'').trim();
     if(!node?.isConnected||!text)return false;
-    const box=ensureAgentResult(node);box.hidden=false;box.classList.remove('error');box.textContent=text;
+    removeAgentInlineOutput(node);
     node.dataset.outputText=text;
     node.dataset.agentRequestId=item.requestId||node.dataset.agentRequestId||'';
     node.dataset.agentTaskId=item.taskId||node.dataset.agentTaskId||'';
@@ -3162,7 +3163,7 @@ splitGrid=async function(n){
         }
       }
       if(!text)throw new Error('Agent 没有返回文字');
-      const box=ensureAgentResult(node);box.hidden=false;box.classList.remove('error');box.textContent=text;node.dataset.outputText=text;
+      removeAgentInlineOutput(node);node.dataset.outputText=text;
       node.dataset.agentRecoveryState='done';
       node.dataset.agentModel=finalResult.model||task.model;node.dataset.agentUpdatedAt=String(Date.now());
       pushAgentTextToConnectedNodes(node,text);
@@ -3280,6 +3281,7 @@ splitGrid=async function(n){
 
   function bindAgentSkillState(node){
     if(!node?.classList.contains('agent-node'))return;
+    removeAgentInlineOutput(node,{includeError:false});
     const select=node.querySelector('.agent-skill');
     if(select&&!select.dataset.skillStateBound){
       select.dataset.skillStateBound='1';
