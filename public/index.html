@@ -112,10 +112,13 @@
     .thumb,.selection b { display:none; }
     .clear { width:30px; height:30px; border:0; border-radius:8px; background:transparent; color:#737780; cursor:pointer; }
     .clear:hover { background:#292b30; color:#cfd2d8; }
-    .prompt { display:block; width:100%; flex:1; min-height:82px; padding:2px 32px 8px 4px; border:0; outline:0; overflow:auto; background:transparent; color:#eceef1; font-size:14px; line-height:1.65; white-space:pre-wrap; word-break:break-word; user-select:text; scrollbar-width:none; -ms-overflow-style:none; }
-    .prompt::-webkit-scrollbar { width:0; height:0; display:none; }
-    .dock,.dock * { scrollbar-width:none !important; -ms-overflow-style:none !important; }
-    .dock::-webkit-scrollbar,.dock *::-webkit-scrollbar { width:0 !important; height:0 !important; display:none !important; background:transparent !important; }
+    .prompt { display:block; width:100%; flex:1; min-height:82px; padding:2px 32px 8px 4px; border:0; outline:0; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; background:transparent; color:#eceef1; font-size:14px; line-height:1.65; white-space:pre-wrap; word-break:break-word; user-select:text; scrollbar-width:thin!important; scrollbar-color:#555a64 transparent; -ms-overflow-style:auto!important; }
+    .prompt::-webkit-scrollbar { width:7px!important; height:0!important; display:block!important; }
+    .prompt::-webkit-scrollbar-track { background:transparent!important; }
+    .prompt::-webkit-scrollbar-thumb { border-radius:8px; background:#555a64!important; }
+    .prompt::-webkit-scrollbar-thumb:hover { background:#717784!important; }
+    .dock,.dock *:not(.prompt) { scrollbar-width:none !important; -ms-overflow-style:none !important; }
+    .dock::-webkit-scrollbar,.dock *:not(.prompt)::-webkit-scrollbar { width:0 !important; height:0 !important; display:none !important; background:transparent !important; }
     .prompt:empty::before { content:attr(data-placeholder); color:#6e727a; pointer-events:none; }
     .inline-mention { position:relative; display:inline-flex; width:38px; height:38px; margin:0 4px; vertical-align:middle; overflow:hidden; border:1px solid #5f6672; border-radius:7px; background:#24262b; box-shadow:0 1px 5px rgba(0,0,0,.28); cursor:default; }
     .inline-mention img { width:100%; height:100%; display:block; object-fit:cover; pointer-events:none; }
@@ -1042,7 +1045,8 @@
   window.addEventListener('pointerup',e=>{if(drag)finishNodeDrag(e)},true);
   window.addEventListener('pointercancel',e=>{if(drag)finishNodeDrag(e)},true);
   window.addEventListener('blur',()=>{if(drag)finishNodeDrag()});
-  canvas.addEventListener('wheel',e=>{if(e.target.closest('.model-menu,.size-menu,.agent,.agent-node,.image-preview,.tool-editor,.mini-map,.workflow-library'))return;e.preventDefault();const rect=canvas.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top,old=zoom;zoom=Math.max(.35,Math.min(2.5,zoom*(e.deltaY<0?1.1:.9)));panX=mx-(mx-panX)*(zoom/old);panY=my-(my-panY)*(zoom/old);transform();updateZoomLabel();scheduleSave()},{passive:false});
+  canvas.addEventListener('wheel',e=>{if(e.target.closest('.dock,.model-menu,.size-menu,.agent,.agent-node,.image-preview,.tool-editor,.mini-map,.workflow-library'))return;e.preventDefault();const rect=canvas.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top,old=zoom;zoom=Math.max(.35,Math.min(2.5,zoom*(e.deltaY<0?1.1:.9)));panX=mx-(mx-panX)*(zoom/old);panY=my-(my-panY)*(zoom/old);transform();updateZoomLabel();scheduleSave()},{passive:false});
+  promptBox.addEventListener('wheel',e=>{e.stopPropagation();if(promptBox.scrollHeight<=promptBox.clientHeight)return;e.preventDefault();promptBox.scrollTop+=e.deltaY},{passive:false});
   document.getElementById('zoomLabel').onclick=()=>{zoom=1;panX=0;panY=0;transform();updateZoomLabel()};
   miniMapCanvas.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();e.stopPropagation();miniMapDrag=true;miniMapCanvas.setPointerCapture(e.pointerId);panFromMiniMap(e)});
   miniMapCanvas.addEventListener('pointermove',e=>{if(!miniMapDrag)return;e.preventDefault();e.stopPropagation();panFromMiniMap(e)});
