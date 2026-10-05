@@ -1,18 +1,38 @@
-本次更新：图片与 Agent 结果实时同步到原画布节点
+更新内容：AI 对话精简为 4 个可处理图片的模型选项
 
-同步机制：
-1. 服务端通过 SSE 每 1.5 秒推送任务状态变化。
-2. 页面每 3 秒自动补查当前画布尚未完成的任务。
-3. 切回浏览器标签页、网络重新连接时立即补查。
-4. 上游完成后，图片或 Agent 文本自动写入原节点，不需要刷新页面。
-5. 只查询节点绑定的 taskId/requestId，不加载账号历史任务。
-6. 查询和找回不会重新调用上游，也不会重复扣费。
-7. 图片加载成功并通过真实像素检查后，冻结积分转为正式扣除；失败才返还。
-
-请保持文件夹结构，覆盖上传以下 3 个文件：
-server.js
+请保持目录结构，覆盖上传以下 5 个文件：
 public/index.html
-src/providers/otterl-image.js
+public/wallet-ui.js
+src/providers/otterl-chat.js
+src/agent-pricing.js
+src/wallet.js
 
-等待 Railway 显示 Deployment successful 后，按 Ctrl + F5 强制刷新一次。
-这次刷新只是为了载入新版程序；之后生成任务不再需要手动刷新。
+上传方法：
+1. 将更新包中的 public 和 src 文件夹按原目录覆盖到 GitHub 仓库。
+2. 等待 Railway 显示 Deployment successful。
+3. 回到画布页面按 Ctrl + F5 强制刷新。
+
+AI 对话模型：
+1. GPT 5.5 Vision · 省积分
+   - 上游模型：gpt-5.5
+   - 图片理解：low
+   - 最大输出：2048 tokens
+2. GPT 5.5 Vision · 高质量
+   - 上游模型：gpt-5.5
+   - 图片理解：high
+   - 最大输出：8192 tokens
+3. Gemini 3.1 Flash Lite · 省积分
+   - 上游模型：gemini-3.1-flash-lite
+   - 最大输出：4096 tokens
+4. Gemini 3 Flash · 标准
+   - 上游模型：gemini-3-flash
+   - 最大输出：8192 tokens
+
+计费说明：
+- 仍然按上游返回的实际输入/输出 token 用量结算。
+- 默认 AGENT_SALE_MULTIPLIER 为 2，即上游成本加一倍差价。
+- 100 KAI 积分 = 1 元；积分最小扣除单位为 1。
+- 任务失败自动返还冻结积分，成功后才按实际用量扣除。
+
+错误提示：
+- 上游失败时会显示 HTTP 状态、错误类型和错误代码，不再只显示 openai_error。

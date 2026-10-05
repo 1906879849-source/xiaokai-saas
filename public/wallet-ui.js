@@ -43,12 +43,10 @@
   };
   // 示例按输入 2,000 + 输出 1,000 tokens 估算；真正扣费按返回用量计算。
   const LOCAL_AGENT_ESTIMATES = {
-    'GPT 5.5 Compact · Instant': 2,
-    'GPT 5.5 · Thinking': 3,
-    'GPT 5.6 SOL · Pro': 3,
-    'Gemini 3.1 Flash Lite': 1,
-    'Gemini 3 Flash Thinking': 1,
-    'Gemini 3.1 Pro High': 2,
+    'GPT 5.5 Vision · 省积分': 3,
+    'GPT 5.5 Vision · 高质量': 3,
+    'Gemini 3.1 Flash Lite · 省积分': 1,
+    'Gemini 3 Flash · 标准': 1,
   };
 
   const actions = document.querySelector('.top-actions');

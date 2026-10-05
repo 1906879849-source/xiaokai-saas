@@ -29,12 +29,10 @@ function numberEnv(name, fallback) {
 const POINT_VALUE_RMB = numberEnv('KAI_POINT_VALUE_RMB', 0.01);
 
 const PRICES = {
-  'Agent · GPT 5.5 Compact · Instant': { default: agentPricing.estimate('GPT 5.5 Compact · Instant').total },
-  'Agent · GPT 5.5 · Thinking': { default: agentPricing.estimate('GPT 5.5 · Thinking').total },
-  'Agent · GPT 5.6 SOL · Pro': { default: agentPricing.estimate('GPT 5.6 SOL · Pro').total },
-  'Agent · Gemini 3.1 Flash Lite': { default: agentPricing.estimate('Gemini 3.1 Flash Lite').total },
-  'Agent · Gemini 3 Flash Thinking': { default: agentPricing.estimate('Gemini 3 Flash Thinking').total },
-  'Agent · Gemini 3.1 Pro High': { default: agentPricing.estimate('Gemini 3.1 Pro High').total },
+  'Agent · GPT 5.5 Vision · 省积分': { default: agentPricing.estimate('GPT 5.5 Vision · 省积分').total },
+  'Agent · GPT 5.5 Vision · 高质量': { default: agentPricing.estimate('GPT 5.5 Vision · 高质量').total },
+  'Agent · Gemini 3.1 Flash Lite · 省积分': { default: agentPricing.estimate('Gemini 3.1 Flash Lite · 省积分').total },
+  'Agent · Gemini 3 Flash · 标准': { default: agentPricing.estimate('Gemini 3 Flash · 标准').total },
   'GPT Image 2': {
     '1K': intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24),
     standard: intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24),

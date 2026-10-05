@@ -3,12 +3,10 @@ const SALE_MULTIPLIER = Number(process.env.AGENT_SALE_MULTIPLIER || 2);
 
 // OtterL 公开价格，单位为人民币 / 1M tokens。面向用户的售价乘 2。
 const PROFILES = {
-  'GPT 5.5 Compact · Instant': { reference: 'gpt-5.5-openai-compact', inputRmbPerMillion: 1, outputRmbPerMillion: 6 },
-  'GPT 5.5 · Thinking': { reference: 'gpt-5.5', inputRmbPerMillion: 1.5, outputRmbPerMillion: 9 },
-  'GPT 5.6 SOL · Pro': { reference: 'gpt-5.6-sol', inputRmbPerMillion: 1.5, outputRmbPerMillion: 9 },
-  'Gemini 3.1 Flash Lite': { reference: 'gemini-3.1-flash-lite', inputRmbPerMillion: 0.1, outputRmbPerMillion: 0.6 },
-  'Gemini 3 Flash Thinking': { reference: 'gemini-3-flash-thinking-128', inputRmbPerMillion: 0.2, outputRmbPerMillion: 1.2 },
-  'Gemini 3.1 Pro High': { reference: 'gemini-3.1-pro-high', inputRmbPerMillion: 0.8, outputRmbPerMillion: 4.8 },
+  'GPT 5.5 Vision · 省积分': { reference: 'gpt-5.5', inputRmbPerMillion: 1.5, outputRmbPerMillion: 9 },
+  'GPT 5.5 Vision · 高质量': { reference: 'gpt-5.5', inputRmbPerMillion: 1.5, outputRmbPerMillion: 9 },
+  'Gemini 3.1 Flash Lite · 省积分': { reference: 'gemini-3.1-flash-lite', inputRmbPerMillion: 0.1, outputRmbPerMillion: 0.6 },
+  'Gemini 3 Flash · 标准': { reference: 'gemini-3-flash', inputRmbPerMillion: 0.2, outputRmbPerMillion: 1.2 },
 };
 
 function profile(model) {

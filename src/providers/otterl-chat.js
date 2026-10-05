@@ -7,12 +7,10 @@ const GENERATED_DIR = process.env.GENERATED_DIR
   : path.join(__dirname, '..', '..', 'generated');
 
 const MODELS = {
-  'GPT 5.5 Compact · Instant': 'gpt-5.5-openai-compact',
-  'GPT 5.5 · Thinking': 'gpt-5.5',
-  'GPT 5.6 SOL · Pro': 'gpt-5.6-sol',
-  'Gemini 3.1 Flash Lite': 'gemini-3.1-flash-lite',
-  'Gemini 3 Flash Thinking': 'gemini-3-flash-thinking-128',
-  'Gemini 3.1 Pro High': 'gemini-3.1-pro-high',
+  'GPT 5.5 Vision · 省积分': { id: 'gpt-5.5', imageDetail: 'low', maxTokens: 2048 },
+  'GPT 5.5 Vision · 高质量': { id: 'gpt-5.5', imageDetail: 'high', maxTokens: 8192 },
+  'Gemini 3.1 Flash Lite · 省积分': { id: 'gemini-3.1-flash-lite', maxTokens: 4096 },
+  'Gemini 3 Flash · 标准': { id: 'gemini-3-flash', maxTokens: 8192 },
 };
 
 function apiKey() {
@@ -82,9 +80,23 @@ function extractText(data) {
   return '';
 }
 
+function upstreamErrorMessage(data, status) {
+  const detail = data?.error || {};
+  const parts = [
+    typeof detail === 'string' ? detail : detail.message,
+    typeof detail === 'object' ? detail.type : '',
+    typeof detail === 'object' ? detail.code : '',
+    data?.message,
+    data?.msg,
+    data?.detail,
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  const unique = [...new Set(parts)];
+  return `OtterL HTTP ${status}${unique.length ? `：${unique.join(' · ')}` : ''}`;
+}
+
 async function runAgent(options) {
-  const providerModel = MODELS[options.model];
-  if (!providerModel) {
+  const modelSpec = MODELS[options.model];
+  if (!modelSpec) {
     const error = new Error(`Agent 模型暂未接入：${options.model || '未选择'}`);
     error.statusCode = 400;
     throw error;
@@ -92,9 +104,13 @@ async function runAgent(options) {
 
   const instruction = buildInstruction(options);
   const userText = buildUserText({ ...options, imageCount: options.imageUrls?.length || 0 });
+  const providerModel = modelSpec.id;
   const userContent = [
     { type: 'text', text: userText },
-    ...(options.imageUrls || []).slice(0, 10).map(url => ({ type: 'image_url', image_url: { url } })),
+    ...(options.imageUrls || []).slice(0, 10).map(url => ({
+      type: 'image_url',
+      image_url: modelSpec.imageDetail ? { url, detail: modelSpec.imageDetail } : { url },
+    })),
   ];
   const controller = new AbortController();
   // Agent 携带多张参考图和较长 Skill 时，上游可能需要数分钟。
@@ -116,7 +132,9 @@ async function runAgent(options) {
       body: JSON.stringify({
         model: providerModel,
         stream: false,
-        max_tokens: 8192,
+        ...(providerModel.startsWith('gpt-')
+          ? { max_completion_tokens: modelSpec.maxTokens }
+          : { max_tokens: modelSpec.maxTokens }),
         messages: [
           { role: 'system', content: instruction },
           { role: 'user', content: userContent },
@@ -127,7 +145,7 @@ async function runAgent(options) {
     try { data = raw ? JSON.parse(raw) : {}; }
     catch { data = { error: { message: raw || `HTTP ${response.status}` } }; }
     if (!response.ok) {
-      const error = new Error(data?.error?.message || data?.message || `OtterL HTTP ${response.status}`);
+      const error = new Error(upstreamErrorMessage(data, response.status));
       error.statusCode = response.status;
       error.payload = data;
       throw error;
