@@ -1,10 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const { generatedDir } = require('../storage-paths');
 
 const API_BASE = () => (process.env.OTTERL_BASE_URL || 'https://otterl.com/v1').replace(/\/$/, '');
-const GENERATED_DIR = process.env.GENERATED_DIR
-  ? path.resolve(process.env.GENERATED_DIR)
-  : path.join(__dirname, '..', '..', 'generated');
+const GENERATED_DIR = generatedDir();
 
 const MODELS = {
   'GPT 5.5 Vision · 省积分': { id: 'gpt-5.5', imageDetail: 'low', maxTokens: 2048 },

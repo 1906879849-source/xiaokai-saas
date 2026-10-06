@@ -73,11 +73,12 @@ const waitForApp = async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': requestId },
       body: JSON.stringify({
-        model: 'GPT 5.5 Compact · Instant',
+        model: 'GPT 5.5 Vision · 省积分',
         metaPrompt: '按完整结构输出',
         userNeed: '测试持久化回答',
         skillName: '测试 SKILL.md',
         skillContent: '# 测试 Skill\n必须输出完整分析、执行步骤和最终文案。',
+        images: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='],
       }),
     });
     const accepted = await run.json();
@@ -93,7 +94,9 @@ const waitForApp = async () => {
     }
     assert.equal(saved.task.state, 'charged');
     assert.equal(saved.task.text, '模拟的 Agent 持久化回答');
-    assert.equal(lastProviderPayload.max_tokens, 8192);
+    assert.equal(lastProviderPayload.max_completion_tokens, 2048);
+    assert.equal(lastProviderPayload.model, 'gpt-5.5');
+    assert.equal(lastProviderPayload.messages[1].content[1].image_url.detail, 'low');
     const sentMessages = JSON.stringify(lastProviderPayload.messages || []);
     assert.match(sentMessages, /测试 Skill/);
     assert.match(sentMessages, /不得只复述规则/);
@@ -102,7 +105,7 @@ const waitForApp = async () => {
     const duplicate = await fetch(`http://127.0.0.1:${appPort}/api/agent/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': requestId },
-      body: JSON.stringify({ model: 'GPT 5.5 Compact · Instant', userNeed: '测试持久化回答' }),
+      body: JSON.stringify({ model: 'GPT 5.5 Vision · 省积分', userNeed: '测试持久化回答' }),
     });
     const recovered = await duplicate.json();
     assert.equal(duplicate.status, 200);
@@ -114,7 +117,7 @@ const waitForApp = async () => {
     const failedRun = await fetch(`http://127.0.0.1:${appPort}/api/agent/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie, 'Idempotency-Key': failedRequestId },
-      body: JSON.stringify({ model: 'GPT 5.5 Compact · Instant', userNeed: 'FORCE_FAIL' }),
+      body: JSON.stringify({ model: 'GPT 5.5 Vision · 省积分', userNeed: 'FORCE_FAIL' }),
     });
     assert.equal(failedRun.status, 202);
     let failedSaved;

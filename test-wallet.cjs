@@ -22,14 +22,14 @@ try {
   assert.equal(wallet.reserve('request-1', price).duplicate, true);
   assert.equal(wallet.recentLedger().filter(x => x.type === 'charge').length, 1);
   assert.equal(wallet.recentLedger().filter(x => x.type === 'release').length, 1);
-  const agentEstimate = wallet.quote({ model: 'Agent · GPT 5.5 Compact · Instant', count: 1 });
+  const agentEstimate = wallet.quote({ model: 'Agent · GPT 5.5 Vision · 省积分', count: 1 });
   assert.equal(agentEstimate.billing, 'usage');
   const agentHold = wallet.reserve('agent-request', { ...agentEstimate, unit: 50, total: 50 });
   wallet.attachTasks(agentHold.reservation.id, [{ taskId: 'agent-task', taskApi: 'agent' }]);
   wallet.settleVariableTask('agent-task', true, 8, {
     usage: { input_tokens: 2000, output_tokens: 1000 },
     resultText: '这是需要在刷新后找回的 Agent 回答。',
-    agentModel: 'GPT 5.5 Compact · Instant',
+    agentModel: 'GPT 5.5 Vision · 省积分',
     providerModel: 'gpt-5.5-chat',
     quote: { total: 8, totalRmb: 0.08 },
   });
@@ -56,6 +56,14 @@ try {
   assert.equal(orphanResult.releasedReservations, 1);
   assert.equal(orphanResult.releasedPoints, 20);
   assert.deepEqual(wallet.publicWallet(), { balance: 72, reserved: 0, available: 72 });
+  wallet.runAs('agent-overage-user', () => {
+    wallet.grant(5, 'Agent 超额结算测试');
+    const overageHold = wallet.reserve('agent-overage-request', { ...agentEstimate, unit: 5, total: 5 });
+    wallet.attachTasks(overageHold.reservation.id, [{ taskId: 'agent-overage-task', taskApi: 'agent' }]);
+    wallet.settleVariableTask('agent-overage-task', true, 12, { resultText: '已生成内容' });
+    assert.deepEqual(wallet.publicWallet(), { balance: -7, reserved: 0, available: 0 });
+    assert.equal(wallet.recentLedger().find(x => x.type === 'charge').amount, -12);
+  });
   console.log('PASS: billing, persisted Agent results, reserve, charge, refund, timeout release and idempotency.');
 } finally {
   fs.rmSync(testDir, { recursive: true, force: true });

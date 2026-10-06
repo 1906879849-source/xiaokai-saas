@@ -1,10 +1,11 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { generatedDir } = require('../storage-paths');
 
 const API_BASE = () => (process.env.KIE_API_BASE_URL || 'https://api.kie.ai').replace(/\/$/, '');
 const UPLOAD_BASE = () => (process.env.KIE_UPLOAD_BASE_URL || 'https://kieai.redpandaai.co').replace(/\/$/, '');
-const GENERATED_DIR = path.join(__dirname, '..', '..', 'generated');
+const GENERATED_DIR = generatedDir();
 const uploadCache = new Map();
 const UPLOAD_CACHE_TTL = 6 * 60 * 60 * 1000;
 

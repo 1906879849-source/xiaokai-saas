@@ -18,11 +18,20 @@ twoKTestPngBuffer.writeUInt32BE(2048, 16);
 twoKTestPngBuffer.writeUInt32BE(2048, 20);
 const twoKTestPng = twoKTestPngBuffer.toString('base64');
 let geminiPayload = null;
+let relativeResultAuthorized = false;
+let openAiGenerationCount = 0;
 
 const fake = http.createServer((req, res) => {
   if (req.url === '/v1/images/generations') {
+    openAiGenerationCount += 1;
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ data: [{ b64_json: oneKTestPng }], usage: { total_tokens: 17 } }));
+    res.end(JSON.stringify({ data: [{ url: openAiGenerationCount === 1 ? '/files/result.png' : '/files/temporary.png' }], usage: { total_tokens: 17 } }));
+    return;
+  }
+  if (req.url === '/files/result.png') {
+    relativeResultAuthorized = req.headers.authorization === 'Bearer test-key';
+    res.writeHead(relativeResultAuthorized ? 200 : 401, { 'content-type': 'image/png' });
+    res.end(relativeResultAuthorized ? Buffer.from(oneKTestPng, 'base64') : 'unauthorized');
     return;
   }
   if (req.url === '/v1beta/models/gemini-3-pro-image-preview:generateContent') {
@@ -65,6 +74,7 @@ fake.listen(0, '127.0.0.1', async () => {
     const completed = await waitForSuccess(provider, created.taskId);
     assert.strictEqual(completed.state, 'success');
     assert.match(completed.resultUrls[0], /^\/generated\//);
+    assert.strictEqual(relativeResultAuthorized, true);
     const generatedName = decodeURIComponent(completed.resultUrls[0].split('/').pop());
     assert.ok(fs.existsSync(path.join(process.env.GENERATED_DIR, generatedName)));
 
@@ -85,6 +95,16 @@ fake.listen(0, '127.0.0.1', async () => {
     assert.strictEqual(geminiCompleted.outputWidth, 2048);
     assert.strictEqual(geminiPayload.generationConfig.imageConfig.imageSize, '2K');
     assert.strictEqual(geminiPayload.generationConfig.imageConfig.aspectRatio, '16:9');
+    const temporaryCreated = await restartedProvider.createImageTask({
+      modelName: 'GPT Image 2.5 Flare',
+      prompt: 'temporary result billing test',
+      aspectRatio: '1:1',
+      resolution: '1K',
+    });
+    const temporaryCompleted = await waitForSuccess(restartedProvider, temporaryCreated.taskId);
+    assert.strictEqual(temporaryCompleted.state, 'success');
+    assert.strictEqual(temporaryCompleted.billingEligible, true);
+    assert.match(temporaryCompleted.resultUrls[0], /\/files\/temporary\.png$/);
     console.log('image recovery tests passed');
   } catch (error) {
     console.error(error);

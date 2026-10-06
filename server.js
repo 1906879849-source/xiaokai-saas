@@ -15,12 +15,13 @@ const accounts = require('./src/accounts');
 const workflows = require('./src/workflows');
 const announcements = require('./src/announcements');
 const platformSettings = require('./src/platform-settings');
+const { generatedDir } = require('./src/storage-paths');
 
 const app = express();
 const PORT = Number(process.env.PORT || 4318);
 const STARTED_AT = Date.now();
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const GENERATED_DIR = process.env.GENERATED_DIR ? path.resolve(process.env.GENERATED_DIR) : path.join(__dirname, 'generated');
+const GENERATED_DIR = generatedDir();
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
 app.disable('x-powered-by');

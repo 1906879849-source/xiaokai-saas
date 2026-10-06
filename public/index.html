@@ -2743,11 +2743,31 @@ splitGrid=async function(n){
     }catch{return[]}
   }
 
+  function nodeImageState(node){
+    const img=node?.querySelector('.uploaded-image');
+    if(!img)return'missing';
+    if(!img.complete)return'loading';
+    return img.naturalWidth>0?'ready':'broken';
+  }
+
+  function markBrokenImageForRecovery(node){
+    if(!node?.isConnected||!savedProviderTasks(node).length)return;
+    node.dataset.providerRecoveryState='pending';
+    setNodeStatus(node,'running','重新加载');
+    setTimeout(syncCurrentCanvas,80);
+  }
+
+  function watchRecoveredImage(node,img){
+    if(!img)return;
+    img.addEventListener('error',()=>markBrokenImageForRecovery(node),{once:true});
+  }
+
   function forceRecoveredImage(node,url,promptText=''){
     const card=node?.querySelector('.card');
     if(!card||!url)throw new Error('恢复结果缺少图片地址');
     const img=document.createElement('img');
     img.className='uploaded-image';img.alt='恢复的生成结果';img.src=url;
+    watchRecoveredImage(node,img);
     const overlay=document.createElement('div');overlay.className='node-run-summary';overlay.textContent='已从图片服务恢复';
     card.replaceChildren(img,overlay);
     node.dataset.outputUrls=JSON.stringify([url]);
@@ -2755,8 +2775,10 @@ splitGrid=async function(n){
     img.onload=()=>{try{bindNodeControls(node);syncNodeChrome(node);updateCompareNodes();wires();scheduleSave()}catch(error){console.warn('恢复图片后的界面绑定失败',error)}};
   }
 
-  async function recoverNode(node,providerTasks,{legacy=false,quiet=false}={}){
-    if(!node?.isConnected||node.querySelector('.uploaded-image')||recoveringNodes.has(node)||!providerTasks.length)return false;
+  async function recoverNode(node,providerTasks,{legacy=false,quiet=false,force=false}={}){
+    const imageState=nodeImageState(node);
+    if(!node?.isConnected||['ready','loading'].includes(imageState)||recoveringNodes.has(node)||!providerTasks.length)return false;
+    if(!force&&node.__kaiRecoveryFailedAt&&Date.now()-node.__kaiRecoveryFailedAt<30000)return false;
     recoveringNodes.add(node);
     const controller=new AbortController();
     const task={
@@ -2778,6 +2800,9 @@ splitGrid=async function(n){
       if(runtime.confirmTemporaryDeliveries)await runtime.confirmTemporaryDeliveries(providerTasks,result.successes);
       node.dataset.providerTasks=JSON.stringify(providerTasks);
       node.dataset.providerRecoveryState='done';
+      delete node.__kaiRecoveryFailedAt;
+      const restoredImage=node.querySelector('.uploaded-image');
+      watchRecoveredImage(node,restoredImage);
       setNodeStatus(node,'done','已恢复');
       await saveProject();
       if(!quiet)note(legacy?'已找回刷新前生成的图片':'已自动恢复生成结果');
@@ -2785,6 +2810,7 @@ splitGrid=async function(n){
     }catch(error){
       if(error?.name!=='AbortError'){
         node.dataset.providerRecoveryState='error';
+        node.__kaiRecoveryFailedAt=Date.now();
         setNodeStatus(node,'error','恢复失败');
         if(!quiet)note('结果恢复失败：'+(error?.message||'未知错误'));
         console.warn('图片结果恢复失败',error);
@@ -2875,15 +2901,15 @@ splitGrid=async function(n){
     }catch(error){if(!/请先登录/.test(error?.message||''))console.warn('读取 Agent 历史结果失败',error);return 0}
   }
 
-  async function recoverKieTasks({manual=false,quiet=false}={}){
+  async function recoverKieTasks({manual=false,quiet=false,force=false}={}){
     const allGenerationNodes=[...document.querySelectorAll('.generation-node')];
-    const emptyNodes=allGenerationNodes.filter(node=>!node.querySelector('.uploaded-image')&&!node.__kaiLivePolling);
+    const emptyNodes=allGenerationNodes.filter(node=>['missing','broken'].includes(nodeImageState(node))&&!node.__kaiLivePolling);
     const claimed=new Set();
     allGenerationNodes.forEach(node=>savedProviderTasks(node).forEach(x=>claimed.add(x.taskId)));
     const recoveries=[];
     for(const node of emptyNodes){
       const tasks=savedProviderTasks(node);
-      if(tasks.length)recoveries.push(recoverNode(node,tasks,{quiet:manual}));
+      if(tasks.length)recoveries.push(recoverNode(node,tasks,{quiet:manual,force}));
     }
 
     if(manual){
@@ -2923,7 +2949,7 @@ splitGrid=async function(n){
     button.disabled=true;button.textContent='查询中…';
     note('正在从后台找回图片和 Agent 对话…');
     try{
-      const [images,agents]=await Promise.all([recoverKieTasks({manual:true,quiet:true}),recoverAgentResults({manual:true})]);
+      const [images,agents]=await Promise.all([recoverKieTasks({manual:true,quiet:true,force:true}),recoverAgentResults({manual:true})]);
       const total=Number(images||0)+Number(agents||0);
       if(total)note(`已找回 ${images||0} 个图片结果、${agents||0} 个 Agent 对话`);
       else note('没有发现可找回的图片或 Agent 对话');
@@ -2948,7 +2974,7 @@ splitGrid=async function(n){
   function currentTaskBindings(){
     const images=[];
     document.querySelectorAll('.generation-node').forEach(node=>{
-      if(node.querySelector('.uploaded-image'))return;
+      if(['ready','loading'].includes(nodeImageState(node)))return;
       savedProviderTasks(node).forEach(item=>images.push({taskId:item.taskId,taskApi:item.taskApi||'market'}));
     });
     const agents=[...document.querySelectorAll('.agent-node')]
@@ -2985,7 +3011,7 @@ splitGrid=async function(n){
       let update={};try{update=JSON.parse(event.data||'{}')}catch{return}
       if(update.kind==='image'){
         document.querySelectorAll('.generation-node').forEach(node=>{
-          if(savedProviderTasks(node).some(item=>item.taskId===update.taskId)&&!node.querySelector('.uploaded-image')){
+          if(savedProviderTasks(node).some(item=>item.taskId===update.taskId)&&['missing','broken'].includes(nodeImageState(node))){
             if(update.state==='generating')setNodeStatus(node,'running','生成中');
             else if(['waiting','queuing'].includes(update.state))setNodeStatus(node,'running','排队中');
           }

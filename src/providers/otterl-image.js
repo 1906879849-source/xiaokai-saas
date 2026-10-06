@@ -2,9 +2,10 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const platformSettings = require('../platform-settings');
+const { generatedDir } = require('../storage-paths');
 
 const tasks = new Map();
-const GENERATED_DIR = process.env.GENERATED_DIR ? path.resolve(process.env.GENERATED_DIR) : path.join(__dirname, '..', '..', 'generated');
+const GENERATED_DIR = generatedDir();
 const TASK_DATA_ROOT = process.env.IMAGE_TASK_DATA_DIR
   || process.env.WALLET_DATA_DIR
   || process.env.ACCOUNT_DATA_DIR
