@@ -334,7 +334,8 @@ async function cacheResultUrls(taskId, urls) {
         clearTimeout(timeout);
       }
     }
-    // 下载仍失败时保留绝对临时地址给前端显示；billingEligible 会阻止扣客户积分。
+    // 下载仍失败时保留绝对临时地址给前端显示。上游已经成功生成并产生费用，
+    // 后台仍会按成功任务结算；本地缓存失败只影响长期保存，不再造成客户免单。
     if (!saved && source) {
       console.warn('[otterl image cache]', taskId, `result ${index + 1}`, lastError?.message || '保存失败');
       cached.push(source);
@@ -438,9 +439,9 @@ async function runTask(task) {
     task.sourceResultUrls = urls;
     task.resultUrls = await cacheResultUrls(task.taskId, urls);
     const locallySaved = task.resultUrls.some(url => String(url).startsWith('/generated/') && hasLocalResult(url));
-    task.billingEligible = locallySaved;
+    task.billingEligible = true;
     if (locallySaved) assertRequestedResolution(task);
-    else task.failMsg = '图片已使用上游临时地址显示；因未完成本地保存与像素校验，本次客户积分不会扣除';
+    else task.failMsg = '图片已由上游成功生成，当前使用临时地址显示；本地缓存将在后台继续恢复';
     task.state = 'success';
     task.progress = 100;
     task.creditsConsumed = json?.usage?.total_tokens ?? json?.usageMetadata?.totalTokenCount ?? null;

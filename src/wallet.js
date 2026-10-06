@@ -191,7 +191,9 @@ function settleVariableTask(taskId, success, actualPrice, detail = {}) {
   store.reserved = Math.max(0, store.reserved - held);
   if (success) {
     const charged = Math.max(1, Math.round(Number(actualPrice) || 1));
-    store.balance = Math.max(0, store.balance - charged);
+    // Agent 按实际 token 结算。实际费用可能高于预冻结金额；此时仍完整记账，
+    // 余额可以短暂为负，后续请求会因可用积分为 0 而被阻止，避免平台替客户垫付差额。
+    store.balance -= charged;
     item.reservedPrice = held;
     item.price = charged;
     item.state = 'charged';

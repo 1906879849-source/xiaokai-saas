@@ -574,7 +574,7 @@ app.get('/api/task/:taskId', async (req, res) => {
     if (task.state === 'success' && urls.length) {
       urls = await cacheRemoteResults(task.taskId, urls);
     }
-    if (task.state === 'success' && task.billingEligible !== false) wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
+    if (task.state === 'success' && urls.length && task.billingEligible !== false) wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
     // 临时地址已经生成、但服务器尚未完成长期保存时保持冻结。
     // 等浏览器确认图片确实加载成功后，再由 confirm-delivery 正式扣分。
     if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
@@ -726,22 +726,23 @@ async function reconcileWalletTasks() {
   reconcilingWallet = true;
   try {
     for (const userId of wallet.listUserIds()) await wallet.runAs(userId, async () => {
-      const expired = wallet.releaseExpiredTasks(taskFreezeTimeoutMs);
-      if (expired.releasedPoints) console.warn('[wallet timeout release]', userId, expired.releasedPoints, 'points');
       for (const item of wallet.pendingTasks().slice(0, 20)) {
         try {
           const selectedProvider = providerFromTaskApi(item.taskApi || 'market');
           const task = await selectedProvider.client.getTask(item.taskId, item.taskApi || 'market');
-          if (task.state === 'success' && task.billingEligible !== false) {
+          if (task.state === 'success' && task.resultUrls?.length && task.billingEligible !== false) {
             const urls = task.resultUrls?.length ? await cacheRemoteResults(task.taskId, task.resultUrls) : [];
             wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
           }
-          // 临时结果等待浏览器 confirm-delivery；超时未确认再由冻结超时机制自动返还。
           if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
         } catch (error) {
           console.warn('[wallet reconcile]', userId, item.taskId, error.message);
         }
       }
+      // 必须先查询上游并结算成功任务，再处理真正过期的任务；否则恰好跨过
+      // 超时点的成功任务会先被返还，造成上游已扣费而客户未扣积分。
+      const expired = wallet.releaseExpiredTasks(taskFreezeTimeoutMs);
+      if (expired.releasedPoints) console.warn('[wallet timeout release]', userId, expired.releasedPoints, 'points');
     });
   } finally {
     reconcilingWallet = false;

@@ -1,38 +1,21 @@
-更新内容：AI 对话精简为 4 个可处理图片的模型选项
+本次更新用于保障 AI 对话与生图节点的客户积分结算。
 
-请保持目录结构，覆盖上传以下 5 个文件：
-public/index.html
-public/wallet-ui.js
-src/providers/otterl-chat.js
-src/agent-pricing.js
-src/wallet.js
+请按原目录覆盖上传以下 3 个文件：
+1. server.js
+2. src/wallet.js
+3. src/providers/otterl-image.js
 
-上传方法：
-1. 将更新包中的 public 和 src 文件夹按原目录覆盖到 GitHub 仓库。
-2. 等待 Railway 显示 Deployment successful。
-3. 回到画布页面按 Ctrl + F5 强制刷新。
+更新后的规则：
+- AI 对话和生图任务提交前先冻结客户积分。
+- 上游成功生成内容后正式扣除客户积分。
+- 上游明确失败才返还冻结积分。
+- 客户刷新、关闭页面或网络中断，不影响后台成功任务结算。
+- 重复查询、找回结果不会重复扣分。
+- Agent 实际 token 费用高于预冻结金额时完整记账，余额不足会显示负数并阻止继续消费，避免平台替客户承担差额。
+- 生图结果即使暂时只能使用上游临时地址，后台仍按已成功生成结算，不会因为客户关闭页面而免单。
 
-AI 对话模型：
-1. GPT 5.5 Vision · 省积分
-   - 上游模型：gpt-5.5
-   - 图片理解：low
-   - 最大输出：2048 tokens
-2. GPT 5.5 Vision · 高质量
-   - 上游模型：gpt-5.5
-   - 图片理解：high
-   - 最大输出：8192 tokens
-3. Gemini 3.1 Flash Lite · 省积分
-   - 上游模型：gemini-3.1-flash-lite
-   - 最大输出：4096 tokens
-4. Gemini 3 Flash · 标准
-   - 上游模型：gemini-3-flash
-   - 最大输出：8192 tokens
-
-计费说明：
-- 仍然按上游返回的实际输入/输出 token 用量结算。
-- 默认 AGENT_SALE_MULTIPLIER 为 2，即上游成本加一倍差价。
-- 100 KAI 积分 = 1 元；积分最小扣除单位为 1。
-- 任务失败自动返还冻结积分，成功后才按实际用量扣除。
-
-错误提示：
-- 上游失败时会显示 HTTP 状态、错误类型和错误代码，不再只显示 openai_error。
+验证结果：
+- npm run check：通过
+- npm run test:wallet：通过
+- npm run test:image-recovery：通过
+- npm run test:agent-recovery：通过
