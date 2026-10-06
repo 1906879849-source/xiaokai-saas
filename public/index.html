@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>kai无限画布</title>
+  <title>KAI画布 V1</title>
   <style>
     :root { --bg:#08090b; --surface:#1c1d21; --line:#292c31; --text:#f1f2f4; --muted:#92969e; }
     * { box-sizing:border-box; }
@@ -13,6 +13,8 @@
     .app { position:relative; height:100vh; min-width:1050px; }
     .top { position:absolute; inset:0 0 auto; z-index:9; height:54px; display:flex; align-items:center; padding:0 18px; background:linear-gradient(180deg,rgba(8,9,11,.9),rgba(8,9,11,0)); pointer-events:none; }
     .brand { display:flex; align-items:center; pointer-events:auto; }
+    .brand-name { margin-left:9px; color:#f5f7fb; font-size:14px; font-weight:800; letter-spacing:.3px; white-space:nowrap; }
+    [data-project-action="apiSettings"] { display:none !important; }
     .brand-icon { width:34px; height:34px; display:grid; place-items:center; border-radius:10px; background:linear-gradient(180deg,#060709,#0b0d12); box-shadow:inset 0 0 0 1px rgba(255,255,255,.06),0 10px 20px rgba(0,0,0,.28),0 0 16px rgba(18,140,255,.12); overflow:hidden; }
     .brand-icon img { width:25px; height:25px; display:block; object-fit:contain; filter:drop-shadow(0 0 6px rgba(31,146,255,.28)); }
     .project { margin-left:16px; font-weight:600; color:#d2d4d9; }
@@ -667,7 +669,7 @@
             <div class="api-model-group"><div class="api-model-group-head"><b>Video 模型</b><span>用于后续即梦视频节点</span></div><div class="api-custom-row"><span>视频 Model ID</span><input class="api-model-id" data-api-custom-model="video" placeholder="按你选择的平台填写对应视频模型 ID"></div></div>
           </div>
         </div>
-        <footer class="api-settings-foot"><div class="api-storage-note">当前只保存接口配置，还没有发起真实模型请求。Key 会保存在这个浏览器的 localStorage 中，适合你现在本地开发测试；正式上线建议改成后端安全保存。</div><button id="apiSettingsClear">清空</button><button class="api-save" id="apiSettingsSave">保存配置</button></footer>
+        <footer class="api-settings-foot"><div class="api-storage-note">模型接口由服务端统一安全管理，客户无需配置 API Key。</div><button id="apiSettingsClear">清空</button><button class="api-save" id="apiSettingsSave">保存配置</button></footer>
       </section>
     </div>
 
@@ -683,7 +685,7 @@
       </section>
       <input id="workflowPresetFile" type="file" accept=".json,.xiaokai" hidden>
     </div>
-    <aside class="agent" id="agent"><header class="agent-head"><b>xiaokai Agent</b><button class="close" id="close">×</button></header><div class="models"><button class="model on">GPT</button><button class="model">Gemini</button><button class="model">即梦</button></div><div class="skill-strip"><button class="skill-load" id="skillLoad">＋ 加载 Skill</button><div class="skill-state"><b id="skillName">未加载 Skill</b><span>支持 SKILL.md 文件</span></div><input id="skillFile" type="file" accept=".md" hidden></div><div class="chat"><div class="msg user">参考这张图片，生成同款构图。</div><div class="msg">可以。选中画布图片后告诉我修改要求即可。</div></div><div class="agent-input"><textarea placeholder="告诉 Agent 你想做什么……"></textarea></div></aside>
+    <aside class="agent" id="agent"><header class="agent-head"><b>KAI Agent</b><button class="close" id="close">×</button></header><div class="models"><button class="model on">GPT</button><button class="model">Gemini</button><button class="model">即梦</button></div><div class="skill-strip"><button class="skill-load" id="skillLoad">＋ 加载 Skill</button><div class="skill-state"><b id="skillName">未加载 Skill</b><span>支持 SKILL.md 文件</span></div><input id="skillFile" type="file" accept=".md" hidden></div><div class="chat"><div class="msg user">参考这张图片，生成同款构图。</div><div class="msg">可以。选中画布图片后告诉我修改要求即可。</div></div><div class="agent-input"><textarea placeholder="告诉 Agent 你想做什么……"></textarea></div></aside>
     <div class="image-preview" id="imagePreview" role="dialog" aria-modal="true" aria-label="图片大图预览"><button class="preview-close" id="previewClose" aria-label="关闭预览">×</button><div class="preview-panel"><div class="preview-stage" id="previewStage"></div><div class="preview-caption" id="previewCaption"></div><div class="preview-info" id="previewInfo"></div><div class="preview-note" id="previewNote"><span class="preview-area-chip" id="previewAreaChip">1 区域</span><input id="previewNoteInput" placeholder="描述你想要如何修改这个区域"><button id="previewNoteSave" title="生成标注副本">✓</button><button id="previewNoteDelete" title="取消当前标注">⌫</button></div><div class="preview-toolbar"><button data-preview-action="minus">－</button><b id="previewZoom">100%</b><button data-preview-action="plus">＋</button><button data-preview-action="fit">适应</button><button data-preview-action="mark">⌖ 区域标注</button><button data-preview-action="original">原图</button><button data-preview-action="2k">导出 2K</button><button data-preview-action="4k">导出 4K</button></div></div></div>
     <aside class="side-drawer" id="assetDrawer"><div class="drawer-head"><b>素材库</b><button data-close-drawer>×</button></div><div class="drawer-tools"><input id="assetSearch" placeholder="搜索素材名称"><button id="assetAdd">＋ 添加</button></div><div class="drawer-list asset-grid" id="assetList"></div><input id="assetFiles" type="file" accept="image/*" multiple hidden></aside>
     <aside class="side-drawer" id="skillDrawer"><div class="drawer-head"><b>统一 Skill 库</b><button data-close-drawer>×</button></div><div class="drawer-tools"><input id="skillSearch" placeholder="搜索名称或内容"><button id="skillAdd">＋ 导入</button></div><div class="drawer-list" id="skillList"></div><input id="skillLibraryFiles" type="file" accept=".md,.txt" multiple hidden></aside>
@@ -697,6 +699,9 @@
   let nodes=[...document.querySelectorAll('.node')];
   let editorHasEraseMarks=false;
   const canvas=document.getElementById('canvas'),world=document.getElementById('world'),dock=document.getElementById('dock'),menu=document.getElementById('contextMenu'),toast=document.getElementById('toast'),promptBox=document.getElementById('prompt'),run=document.getElementById('run'),agent=document.getElementById('agent'),imageUpload=document.getElementById('imageUpload'),imagePreview=document.getElementById('imagePreview'),previewStage=document.getElementById('previewStage'),previewCaption=document.getElementById('previewCaption'),toolEditor=document.getElementById('toolEditor'),editorCanvas=document.getElementById('editorCanvas'),editorContext=editorCanvas.getContext('2d'),miniMap=document.getElementById('miniMap'),miniMapCanvas=document.getElementById('miniMapCanvas'),miniMapContext=miniMapCanvas.getContext('2d');
+  const brand=document.querySelector('.brand');
+  if(brand&&!brand.querySelector('.brand-name')){const name=document.createElement('span');name.className='brand-name';name.textContent='KAI画布 V1';brand.appendChild(name)}
+  const agentTitle=document.querySelector('.agent-head b');if(agentTitle)agentTitle.textContent='KAI Agent';
   function promptPlainValue(){let out='';const walk=node=>{node.childNodes.forEach(child=>{if(child.nodeType===Node.TEXT_NODE)out+=child.nodeValue||'';else if(child.nodeType===Node.ELEMENT_NODE){if(child.classList?.contains('inline-mention'))out+=child.dataset.token||'';else if(child.tagName==='BR')out+='\n';else walk(child)}})};walk(promptBox);return out.replace(/\u00a0/g,' ')}
   Object.defineProperty(promptBox,'value',{configurable:true,get(){return promptPlainValue()},set(v){this.textContent=v||''}});
   Object.defineProperty(promptBox,'placeholder',{configurable:true,get(){return this.dataset.placeholder||''},set(v){this.dataset.placeholder=v||''}});
@@ -2496,7 +2501,7 @@ splitGrid=async function(n){
       if(result.failures.length)task.errorReason=result.failures.map(x=>x.failMsg||x.failCode).filter(Boolean).join('；');
       setNodeStatus(node,'done',result.failures.length?'部分成功':'已完成');
       if(temporaryCount)note('图片已确认加载成功，客户积分已正式扣除');
-      else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'测试图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
+      else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
       if(error?.name==='AbortError'||task.status==='canceled')return;
       task.status='error';task.phase='failed';task.errorReason=error?.message||'生成失败';task.note=task.errorReason;

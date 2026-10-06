@@ -185,7 +185,7 @@ app.post('/api/auth/register', (req, res) => {
     setSessionCookie(res, token);
     wallet.runAs(user.id, () => {
       const initialAdminCredits = user.role === 'admin' ? Number(process.env.FIRST_ADMIN_CREDITS || 0) : 0;
-      if (Number.isInteger(initialAdminCredits) && initialAdminCredits > 0 && wallet.publicWallet().balance === 0) wallet.grant(initialAdminCredits, '首位管理员测试积分');
+      if (Number.isInteger(initialAdminCredits) && initialAdminCredits > 0 && wallet.publicWallet().balance === 0) wallet.grant(initialAdminCredits, '管理员初始积分');
       res.json({ ok: true, user, wallet: wallet.publicWallet() });
     });
   } catch (error) { safeJsonError(res, error); }

@@ -1,8 +1,8 @@
 {
-  "name": "xiaokai-kie-backend-v1",
+  "name": "kai-canvas-v1",
   "version": "1.0.0",
   "private": true,
-  "description": "xiaokai 无限画布 Kie.ai 后端 V1",
+  "description": "KAI画布 V1",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
