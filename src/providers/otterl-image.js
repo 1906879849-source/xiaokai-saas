@@ -420,13 +420,13 @@ function localResultDimensions(url) {
 
 function assertRequestedResolution(task) {
   const dimensions = task.resultUrls.map(localResultDimensions).find(Boolean);
-  if (!dimensions) throw new Error('生成图片已返回，但无法读取真实像素；本次客户积分不会扣除');
+  if (!dimensions) throw new Error('生成图片已返回，但后台暂时无法读取真实像素；将由浏览器确认交付并结算');
   task.outputWidth = dimensions.width;
   task.outputHeight = dimensions.height;
   const longest = Math.max(dimensions.width, dimensions.height);
   const minimum = task.resolution === '4K' ? 3500 : task.resolution === '2K' ? 1800 : 700;
   if (longest < minimum) {
-    throw new Error(`上游未按 ${task.resolution} 输出（实际 ${dimensions.width}×${dimensions.height}）；本次客户积分不会扣除`);
+    throw new Error(`上游未按 ${task.resolution} 输出（实际 ${dimensions.width}×${dimensions.height}）；将保留图片并按成功交付结算`);
   }
 }
 
@@ -441,7 +441,7 @@ function assertRequestedAspectRatio(task, dimensions = null) {
   const actual = measured.width / measured.height;
   const deviation = Math.abs(actual - expected) / expected;
   if (deviation > 0.025) {
-    throw new Error(`上游未按 ${requested} 输出（实际 ${measured.width}×${measured.height}，比例约 ${actual.toFixed(3)}:1）；本次客户积分不会扣除`);
+    throw new Error(`上游未按 ${requested} 输出（实际 ${measured.width}×${measured.height}，比例约 ${actual.toFixed(3)}:1）；将保留图片并按成功交付结算`);
   }
 }
 

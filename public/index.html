@@ -2076,7 +2076,7 @@ splitGrid=async function(n){
     if(!task)return '未知';
     if(task.status==='pending')return '等待';
     if(task.status==='running')return task.phase==='uploading'?'上传中':'生成中';
-    if(task.status==='done')return '成功';
+    if(task.status==='done')return task.phase==='warning'?'成功·规格提示':'成功';
     if(task.status==='error')return '失败';
     if(task.status==='canceled')return '已取消';
     return task.status||'未知';
@@ -2322,7 +2322,7 @@ splitGrid=async function(n){
       });
       const text=await res.text();
       let data={};try{data=text?JSON.parse(text):{}}catch{data={error:text||('HTTP '+res.status)}}
-      if(!res.ok||data?.ok===false)throw new Error(data?.error||data?.message||('HTTP '+res.status));
+      if(!res.ok||data?.ok===false){const error=new Error(data?.error||data?.message||('HTTP '+res.status));error.status=res.status;error.data=data;throw error}
       return data;
     }finally{clearTimeout(timer)}
   }
@@ -2403,16 +2403,26 @@ splitGrid=async function(n){
   }
   async function confirmTemporaryDeliveries(providerTasks,successes){
     const temporary=successes.filter(item=>item.billingEligible===false);
+    const warnings=[];
+    let confirmedCount=0;
     for(const item of temporary){
       const url=Array.isArray(item.urls)?item.urls.find(Boolean):'';
       if(!url)throw new Error('上游没有返回可确认的图片地址，暂不扣积分');
       const dimensions=await loadDeliveredImage(url);
       const meta=providerTasks.find(task=>task.taskId===item.taskId)||{};
       const api=meta.taskApi==='gpt4o'?'?api=gpt4o':meta.taskApi==='mock'?'?api=mock':meta.taskApi==='otterl'?'?api=otterl':'';
-      const confirmed=await apiFetch('/api/task/'+encodeURIComponent(item.taskId)+'/confirm-delivery'+api,{method:'POST',body:dimensions,timeoutMs:90000});
-      window.KAI_WALLET?.apply(confirmed.wallet);
+      try{
+        const confirmed=await apiFetch('/api/task/'+encodeURIComponent(item.taskId)+'/confirm-delivery'+api,{method:'POST',body:dimensions,timeoutMs:90000});
+        window.KAI_WALLET?.apply(confirmed.wallet);confirmedCount+=1;
+        if(confirmed.warning)warnings.push(confirmed.warning);
+      }catch(error){
+        const deliveryWarning=['DELIVERY_PIXEL_CHECK_FAILED','DELIVERY_RATIO_CHECK_FAILED'].includes(error?.data?.code);
+        if(!deliveryWarning)throw error;
+        window.KAI_WALLET?.apply(error.data?.wallet);
+        warnings.push(error.message);
+      }
     }
-    return temporary.length;
+    return{confirmedCount,warnings};
   }
   async function pollProviderTasks(providerTasks,task,node,controller){
     const states=new Map(providerTasks.map(x=>[x.taskId,{state:'waiting',urls:[]}]))
@@ -2494,14 +2504,15 @@ splitGrid=async function(n){
         throw new Error(reason);
       }
       applyRealResults(node,result.urls,resolved,task);
-      const temporaryCount=await confirmTemporaryDeliveries(created.tasks,result.successes);
+      const delivery=await confirmTemporaryDeliveries(created.tasks,result.successes);
       node.dataset.providerRecoveryState='done';
-      task.status='done';task.phase='success';
-      task.note=temporaryCount?'生成成功 · 已确认交付':result.failures.length?(`部分成功 ${result.successes.length}/${created.tasks.length}`):'生成成功';
+      task.status='done';task.phase=delivery.warnings.length?'warning':'success';
+      task.note=delivery.warnings.length?('图片已生成并扣分 · '+delivery.warnings[0]):delivery.confirmedCount?'生成成功 · 已确认交付':result.failures.length?(`部分成功 ${result.successes.length}/${created.tasks.length}`):'生成成功';
       task.finishedAt=Date.now();task.durationMs=task.finishedAt-task.startedAt;
       if(result.failures.length)task.errorReason=result.failures.map(x=>x.failMsg||x.failCode).filter(Boolean).join('；');
-      setNodeStatus(node,'done',result.failures.length?'部分成功':'已完成');
-      if(temporaryCount)note('图片已确认加载成功，客户积分已正式扣除');
+      setNodeStatus(node,'done',delivery.warnings.length?'已完成·规格提示':result.failures.length?'部分成功':'已完成');
+      if(delivery.warnings.length)note(delivery.warnings[0]);
+      else if(delivery.confirmedCount)note('图片已确认加载成功，客户积分已正式扣除');
       else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
       if(error?.name==='AbortError'||task.status==='canceled')return;
@@ -2803,13 +2814,13 @@ splitGrid=async function(n){
       if(!result.successes.length)throw new Error(result.failures.map(x=>x.failMsg||x.failCode).filter(Boolean).join('；')||'任务没有可恢复结果');
       try{runtime.applyRealResults(node,result.urls,task.promptText,task)}
       catch(applyError){console.warn('标准恢复流程失败，改用图片直填',applyError);forceRecoveredImage(node,result.urls[0],task.promptText)}
-      if(runtime.confirmTemporaryDeliveries)await runtime.confirmTemporaryDeliveries(providerTasks,result.successes);
+      const delivery=runtime.confirmTemporaryDeliveries?await runtime.confirmTemporaryDeliveries(providerTasks,result.successes):{warnings:[]};
       node.dataset.providerTasks=JSON.stringify(providerTasks);
       node.dataset.providerRecoveryState='done';
       delete node.__kaiRecoveryFailedAt;
       const restoredImage=node.querySelector('.uploaded-image');
       watchRecoveredImage(node,restoredImage);
-      setNodeStatus(node,'done','已恢复');
+      setNodeStatus(node,'done',delivery.warnings?.length?'已恢复·规格提示':'已恢复');
       await saveProject();
       if(!quiet)note(legacy?'已找回刷新前生成的图片':'已自动恢复生成结果');
       return true;

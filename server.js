@@ -625,8 +625,17 @@ app.post('/api/task/:taskId/confirm-delivery', async (req, res) => {
     const resolution = String(task.resolution || '1K').toUpperCase();
     const minimum = resolution === '4K' ? 3500 : resolution === '2K' ? 1800 : 700;
     if (!width || !height || longest < minimum) {
-      wallet.settleTask(task.taskId, false, { failCode: 'DELIVERY_PIXEL_CHECK_FAILED', width, height, resolution });
-      return res.status(422).json({ ok: false, error: `图片像素未达到 ${resolution} 要求（实际 ${width}×${height}），积分已返还`, wallet: wallet.publicWallet() });
+      const nextWallet = wallet.settleTask(task.taskId, true, {
+        providerCredits: task.creditsConsumed,
+        resultUrls: task.resultUrls,
+        providerModel: task.model,
+        deliveryConfirmed: true,
+        deliveryWarning: 'DELIVERY_PIXEL_CHECK_FAILED',
+        width,
+        height,
+        resolution,
+      });
+      return res.json({ ok: true, charged: true, code: 'DELIVERY_PIXEL_CHECK_FAILED', warning: `图片已生成并交付，但像素未达到 ${resolution} 要求（实际 ${width}×${height}），已正常扣除积分`, taskId: task.taskId, width, height, resolution, wallet: nextWallet });
     }
     const requestedRatio = String(task.aspectRatio || 'auto');
     const ratioMatch = requestedRatio.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
@@ -635,8 +644,17 @@ app.post('/api/task/:taskId/confirm-delivery', async (req, res) => {
       const actualRatio = width / height;
       const deviation = Math.abs(actualRatio - expectedRatio) / expectedRatio;
       if (deviation > 0.025) {
-        wallet.settleTask(task.taskId, false, { failCode: 'DELIVERY_RATIO_CHECK_FAILED', width, height, requestedRatio });
-        return res.status(422).json({ ok: false, error: `上游未按 ${requestedRatio} 输出（实际 ${width}×${height}），积分已返还`, wallet: wallet.publicWallet() });
+        const nextWallet = wallet.settleTask(task.taskId, true, {
+          providerCredits: task.creditsConsumed,
+          resultUrls: task.resultUrls,
+          providerModel: task.model,
+          deliveryConfirmed: true,
+          deliveryWarning: 'DELIVERY_RATIO_CHECK_FAILED',
+          width,
+          height,
+          requestedRatio,
+        });
+        return res.json({ ok: true, charged: true, code: 'DELIVERY_RATIO_CHECK_FAILED', warning: `图片已生成并交付，但上游未按 ${requestedRatio} 输出（实际 ${width}×${height}），已正常扣除积分`, taskId: task.taskId, width, height, resolution, wallet: nextWallet });
       }
     }
     const urls = await cacheRemoteResults(task.taskId, task.resultUrls);
