@@ -366,12 +366,12 @@ function cacheTaskResultsInBackground(task) {
         task.billingEligible = true;
         task.failMsg = '';
       } else {
-        task.billingEligible = false;
+        task.billingEligible = true;
         task.failMsg = '图片已由上游成功生成，当前使用临时地址显示；本地缓存将在后台继续恢复';
       }
       persistTask(task);
     } catch (error) {
-      task.billingEligible = false;
+      task.billingEligible = true;
       task.failMsg = `图片已生成并可临时显示，但持久化缓存失败：${error?.message || '未知错误'}`;
       persistTask(task);
       console.warn('[otterl image background cache]', task.taskId, error?.message || error);
@@ -488,8 +488,8 @@ async function runTask(task) {
     if (!urls.length) throw new Error('OtterL 返回成功，但没有可用的图片结果');
     task.sourceResultUrls = normalizeResultUrls(urls);
     task.resultUrls = task.sourceResultUrls.slice();
-    // 临时结果先交给画布加载。只有浏览器确认像素，或后台已成功持久化并校验像素后才扣积分。
-    task.billingEligible = false;
+    // 上游已经成功返回图片并产生费用，按成功任务结算；像素和比例检查只作为交付提示。
+    task.billingEligible = true;
     task.state = 'success';
     task.progress = 100;
     task.creditsConsumed = json?.usage?.total_tokens ?? json?.usageMetadata?.totalTokenCount ?? null;

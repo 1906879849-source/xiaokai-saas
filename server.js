@@ -580,9 +580,8 @@ app.get('/api/task/:taskId', async (req, res) => {
     if (task.state === 'success' && urls.length && taskApi !== 'otterl') {
       urls = await cacheRemoteResults(task.taskId, urls);
     }
-    if (task.state === 'success' && urls.length && task.billingEligible !== false) wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
-    // 临时地址已经生成、但服务器尚未完成长期保存时保持冻结。
-    // 等浏览器确认图片确实加载成功后，再由 confirm-delivery 正式扣分。
+    // 上游成功并返回图片地址就立即按成功结算，避免浏览器确认异常导致平台替客户承担上游成本。
+    if (task.state === 'success' && urls.length) wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
     if (task.state === 'fail') wallet.settleTask(task.taskId, false, { failCode: task.failCode });
     const base = `${req.protocol}://${req.get('host')}`;
     const absoluteUrls = urls.map(url => url.startsWith('/') ? `${base}${url}` : url);
@@ -603,6 +602,68 @@ app.get('/api/task/:taskId', async (req, res) => {
       aspectRatio: task.aspectRatio || 'auto',
       wallet: wallet.publicWallet(),
     });
+  } catch (error) {
+    safeJsonError(res, error);
+  }
+});
+
+// Generated images are frequently returned from a different origin. Browsers ignore
+// the download attribute for those URLs and open the image instead. Proxy only an
+// image that belongs to the signed-in user's task so the canvas can download/export
+// it without exposing an arbitrary URL fetch endpoint.
+app.get('/api/task/:taskId/image', async (req, res) => {
+  try {
+    if (!wallet.hasTask(req.params.taskId)) {
+      return res.status(404).json({ ok: false, error: '当前账号没有这个图片任务' });
+    }
+    const taskApi = req.query.api === 'mock' ? 'mock' : req.query.api === 'gpt4o' ? 'gpt4o' : req.query.api === 'otterl' ? 'otterl' : 'market';
+    const selectedProvider = providerFromTaskApi(taskApi);
+    const task = await selectedProvider.client.getTask(req.params.taskId, taskApi);
+    if (task.state !== 'success' || !Array.isArray(task.resultUrls) || !task.resultUrls.length) {
+      return res.status(409).json({ ok: false, error: '图片任务尚未成功，暂时不能下载' });
+    }
+    const requestedIndex = Math.max(0, Math.floor(Number(req.query.index) || 0));
+    const sourceUrl = String(task.resultUrls[Math.min(requestedIndex, task.resultUrls.length - 1)] || '');
+    if (!sourceUrl) return res.status(404).json({ ok: false, error: '未找到可下载的图片' });
+
+    if (sourceUrl.startsWith('/generated/')) {
+      const fileName = path.basename(decodeURIComponent(sourceUrl.slice('/generated/'.length)));
+      const filePath = path.join(GENERATED_DIR, fileName);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ ok: false, error: '本地图片文件已丢失，请使用找回结果' });
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      return res.sendFile(filePath);
+    }
+
+    const dataImage = sourceUrl.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i);
+    if (dataImage) {
+      const buffer = Buffer.from(dataImage[2].replace(/\s+/g, ''), 'base64');
+      if (!buffer.length) return res.status(404).json({ ok: false, error: '图片数据为空' });
+      if (buffer.length > 80 * 1024 * 1024) return res.status(413).json({ ok: false, error: '图片超过 80MB，无法在画布中导出' });
+      res.setHeader('Content-Type', dataImage[1]);
+      res.setHeader('Content-Length', String(buffer.length));
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      return res.send(buffer);
+    }
+
+    if (!/^https?:\/\//i.test(sourceUrl)) {
+      return res.status(400).json({ ok: false, error: '图片地址无效' });
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 45000);
+    let response;
+    try {
+      response = await fetch(sourceUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) throw Object.assign(new Error(`下载上游图片失败：HTTP ${response.status}`), { statusCode: 502 });
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!buffer.length) throw Object.assign(new Error('上游返回了空图片'), { statusCode: 502 });
+    if (buffer.length > 80 * 1024 * 1024) throw Object.assign(new Error('图片超过 80MB，无法在画布中导出'), { statusCode: 413 });
+    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(buffer);
   } catch (error) {
     safeJsonError(res, error);
   }
