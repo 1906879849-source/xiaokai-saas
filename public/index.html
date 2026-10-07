@@ -156,6 +156,7 @@
     .background-grid button { height:42px; background:transparent; }
     .ratio-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:9px; margin-bottom:15px; }
     .ratio-grid button { height:76px !important; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; }
+    .ratio-grid button[hidden] { display:none !important; }
     .ratio-icon { display:block; border:2px solid #d9dce2; border-radius:2px; opacity:.9; }
     .ratio-icon.auto { width:19px; height:16px; border-style:dashed; }
     .ratio-icon.square { width:14px; height:14px; }
@@ -579,8 +580,8 @@
             <div class="option-label">比例</div>
             <div class="ratio-grid">
               <button class="on"><span class="ratio-icon auto"></span><span>自适应</span></button><button><span class="ratio-icon square"></span><span>1:1</span></button><button><span class="ratio-icon wide"></span><span>16:9</span></button><button><span class="ratio-icon tall"></span><span>9:16</span></button><button><span class="ratio-icon land"></span><span>4:3</span></button>
-              <button><span class="ratio-icon port"></span><span>3:4</span></button><button><span class="ratio-icon wide"></span><span>3:2</span></button><button><span class="ratio-icon port"></span><span>2:3</span></button><button><span class="ratio-icon land"></span><span>5:4</span></button><button><span class="ratio-icon port"></span><span>4:5</span></button>
-              <button><span class="ratio-icon wide"></span><span>21:9</span></button><button><span class="ratio-icon auto"></span><span>自定义</span></button>
+              <button><span class="ratio-icon port"></span><span>3:4</span></button><button><span class="ratio-icon wide"></span><span>3:2</span></button><button><span class="ratio-icon port"></span><span>2:3</span></button><button hidden aria-hidden="true"><span class="ratio-icon land"></span><span>5:4</span></button><button hidden aria-hidden="true"><span class="ratio-icon port"></span><span>4:5</span></button>
+              <button><span class="ratio-icon wide"></span><span>21:9</span></button><button hidden aria-hidden="true"><span class="ratio-icon auto"></span><span>自定义</span></button>
             </div>
             <div class="option-label">分辨率</div><div class="resolution-grid"><button class="on" data-value="1K">1K</button><button data-value="2K" hidden>2K</button><button data-value="4K" hidden>4K</button></div>
             <div class="option-label">生成数量</div><div class="count-grid"><button class="on">1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button></div>

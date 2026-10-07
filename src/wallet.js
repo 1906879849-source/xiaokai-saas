@@ -388,6 +388,10 @@ function recentTasks(limit = 20) {
     .map(item => ({ ...item }));
 }
 
+function hasTask(taskId) {
+  return Boolean(store.tasks[String(taskId || '')]);
+}
+
 function taskByRequest(requestId) {
   const reservationId = store.requests[String(requestId || '')];
   if (!reservationId) return null;
@@ -421,6 +425,6 @@ function pointValueRmb() { return POINT_VALUE_RMB; }
 
 module.exports = {
   publicWallet, quote, reserve, attachTasks, releaseUnattached,
-  settleTask, settleVariableTask, recentLedger, pendingTasks, recentTasks, pricing, pointValueRmb, grant,
+  settleTask, settleVariableTask, recentLedger, pendingTasks, recentTasks, hasTask, pricing, pointValueRmb, grant,
   taskByRequest, recentAgentResults, releaseExpiredTasks, runAs, listUserIds,
 };

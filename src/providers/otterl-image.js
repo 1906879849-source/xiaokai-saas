@@ -76,19 +76,14 @@ function normalizeBackground(value) {
 }
 
 function openAiImageOptions(aspectRatio, resolution) {
-  const portrait = new Set(['9:16', '3:4', '2:3', '4:5']);
-  const landscape = new Set(['16:9', '4:3', '3:2', '5:4', '21:9']);
-  const size = portrait.has(aspectRatio)
-    ? '1024x1536'
-    : landscape.has(aspectRatio)
-      ? '1536x1024'
-      : '1024x1024';
+  const explicitRatio = aspectRatio !== 'auto';
   return {
-    size,
     quality: resolution === '1K' ? 'medium' : 'high',
     resolution,
     image_size: resolution,
-    ...(aspectRatio !== 'auto' ? { aspect_ratio: aspectRatio } : {}),
+    // 不能同时发送固定 size（例如 1536x1024）和另一个 aspect_ratio。
+    // OtterL 会优先采用 size，造成选择 21:9 却实际输出 3:2。
+    ...(explicitRatio ? { aspect_ratio: aspectRatio } : { size: 'auto' }),
   };
 }
 
@@ -252,6 +247,7 @@ function publicTask(task) {
     sourceResultUrls: Array.isArray(task.sourceResultUrls) ? task.sourceResultUrls.filter(url => /^https?:\/\//i.test(String(url))) : [],
     billingEligible: task.billingEligible !== false,
     resolution: task.resolution || '1K',
+    aspectRatio: task.aspectRatio || 'auto',
     failCode: task.failCode || '',
     failMsg: task.failMsg || '',
     creditsConsumed: task.creditsConsumed ?? null,
@@ -263,6 +259,7 @@ function publicTask(task) {
 }
 
 function persistTask(task) {
+  fs.mkdirSync(TASK_DIR, { recursive: true });
   const file = taskFile(task.taskId);
   const temp = `${file}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(publicTask(task), null, 2));
@@ -345,6 +342,43 @@ async function cacheResultUrls(taskId, urls) {
   return cached.filter(Boolean);
 }
 
+function normalizeResultUrls(urls) {
+  return (Array.isArray(urls) ? urls : []).map(raw => {
+    const value = String(raw || '').trim();
+    if (!value || /^data:/i.test(value) || value.startsWith('/generated/')) return value;
+    try { return new URL(value, `${new URL(apiBase()).origin}/`).toString(); }
+    catch { return value; }
+  }).filter(Boolean);
+}
+
+function cacheTaskResultsInBackground(task) {
+  // 上游已经生成完成时先允许浏览器拿到临时结果，不再让持久化下载阻塞画布。
+  // 缓存成功后再切换为本地 /generated 地址；失败时保留临时地址并由前端确认交付。
+  setImmediate(async () => {
+    try {
+      const cached = await cacheResultUrls(task.taskId, task.sourceResultUrls);
+      if (!cached.length) return;
+      task.resultUrls = cached;
+      const locallySaved = cached.some(url => String(url).startsWith('/generated/') && hasLocalResult(url));
+      if (locallySaved) {
+        assertRequestedResolution(task);
+        assertRequestedAspectRatio(task);
+        task.billingEligible = true;
+        task.failMsg = '';
+      } else {
+        task.billingEligible = false;
+        task.failMsg = '图片已由上游成功生成，当前使用临时地址显示；本地缓存将在后台继续恢复';
+      }
+      persistTask(task);
+    } catch (error) {
+      task.billingEligible = false;
+      task.failMsg = `图片已生成并可临时显示，但持久化缓存失败：${error?.message || '未知错误'}`;
+      persistTask(task);
+      console.warn('[otterl image background cache]', task.taskId, error?.message || error);
+    }
+  });
+}
+
 function hasLocalResult(url) {
   const prefix = '/generated/';
   const value = String(url || '');
@@ -396,6 +430,21 @@ function assertRequestedResolution(task) {
   }
 }
 
+function assertRequestedAspectRatio(task, dimensions = null) {
+  const requested = String(task.aspectRatio || 'auto');
+  if (requested === 'auto') return;
+  const match = requested.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+  if (!match) return;
+  const measured = dimensions || task.resultUrls.map(localResultDimensions).find(Boolean);
+  if (!measured?.width || !measured?.height) return;
+  const expected = Number(match[1]) / Number(match[2]);
+  const actual = measured.width / measured.height;
+  const deviation = Math.abs(actual - expected) / expected;
+  if (deviation > 0.025) {
+    throw new Error(`上游未按 ${requested} 输出（实际 ${measured.width}×${measured.height}，比例约 ${actual.toFixed(3)}:1）；本次客户积分不会扣除`);
+  }
+}
+
 async function runTask(task) {
   task.state = 'generating';
   task.progress = 8;
@@ -437,15 +486,16 @@ async function runTask(task) {
     }
     if (!urls) urls = extractResultUrls(json);
     if (!urls.length) throw new Error('OtterL 返回成功，但没有可用的图片结果');
-    task.sourceResultUrls = urls;
-    task.resultUrls = await cacheResultUrls(task.taskId, urls);
-    const locallySaved = task.resultUrls.some(url => String(url).startsWith('/generated/') && hasLocalResult(url));
-    task.billingEligible = true;
-    if (locallySaved) assertRequestedResolution(task);
-    else task.failMsg = '图片已由上游成功生成，当前使用临时地址显示；本地缓存将在后台继续恢复';
+    task.sourceResultUrls = normalizeResultUrls(urls);
+    task.resultUrls = task.sourceResultUrls.slice();
+    // 临时结果先交给画布加载。只有浏览器确认像素，或后台已成功持久化并校验像素后才扣积分。
+    task.billingEligible = false;
     task.state = 'success';
     task.progress = 100;
     task.creditsConsumed = json?.usage?.total_tokens ?? json?.usageMetadata?.totalTokenCount ?? null;
+    task.finishedAt = Date.now();
+    persistTask(task);
+    cacheTaskResultsInBackground(task);
   } catch (error) {
     task.state = 'fail';
     task.progress = 100;
@@ -548,6 +598,7 @@ async function getTask(taskId) {
     creditsConsumed: task.creditsConsumed,
     billingEligible: task.billingEligible !== false,
     resolution: task.resolution || '1K',
+    aspectRatio: task.aspectRatio || 'auto',
     outputWidth: Number(task.outputWidth || 0),
     outputHeight: Number(task.outputHeight || 0),
   };

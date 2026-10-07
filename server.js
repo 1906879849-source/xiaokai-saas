@@ -568,11 +568,16 @@ app.post('/api/image/generate', async (req, res) => {
 
 app.get('/api/task/:taskId', async (req, res) => {
   try {
+    if (!wallet.hasTask(req.params.taskId)) {
+      return res.status(404).json({ ok: false, error: '当前账号没有这个图片任务' });
+    }
     const taskApi = req.query.api === 'mock' ? 'mock' : req.query.api === 'gpt4o' ? 'gpt4o' : req.query.api === 'otterl' ? 'otterl' : 'market';
     const selectedProvider = providerFromTaskApi(taskApi);
     const task = await selectedProvider.client.getTask(req.params.taskId, taskApi);
     let urls = task.resultUrls;
-    if (task.state === 'success' && urls.length) {
+    // OtterL provider 已自行做后台持久化。这里再次同步下载会让“上游已完成”后
+    // 画布仍额外等待 15 秒甚至更久，因此 OtterL 临时地址直接返回给浏览器。
+    if (task.state === 'success' && urls.length && taskApi !== 'otterl') {
       urls = await cacheRemoteResults(task.taskId, urls);
     }
     if (task.state === 'success' && urls.length && task.billingEligible !== false) wallet.settleTask(task.taskId, true, { providerCredits: task.creditsConsumed, resultUrls: urls, providerModel: task.model });
@@ -595,6 +600,7 @@ app.get('/api/task/:taskId', async (req, res) => {
       creditsConsumed: task.creditsConsumed,
       billingEligible: task.billingEligible !== false,
       resolution: task.resolution || '1K',
+      aspectRatio: task.aspectRatio || 'auto',
       wallet: wallet.publicWallet(),
     });
   } catch (error) {
@@ -604,6 +610,9 @@ app.get('/api/task/:taskId', async (req, res) => {
 
 app.post('/api/task/:taskId/confirm-delivery', async (req, res) => {
   try {
+    if (!wallet.hasTask(req.params.taskId)) {
+      return res.status(404).json({ ok: false, error: '当前账号没有这个图片任务' });
+    }
     const taskApi = req.query.api === 'mock' ? 'mock' : req.query.api === 'gpt4o' ? 'gpt4o' : req.query.api === 'otterl' ? 'otterl' : 'market';
     const selectedProvider = providerFromTaskApi(taskApi);
     const task = await selectedProvider.client.getTask(req.params.taskId, taskApi);
@@ -618,6 +627,17 @@ app.post('/api/task/:taskId/confirm-delivery', async (req, res) => {
     if (!width || !height || longest < minimum) {
       wallet.settleTask(task.taskId, false, { failCode: 'DELIVERY_PIXEL_CHECK_FAILED', width, height, resolution });
       return res.status(422).json({ ok: false, error: `图片像素未达到 ${resolution} 要求（实际 ${width}×${height}），积分已返还`, wallet: wallet.publicWallet() });
+    }
+    const requestedRatio = String(task.aspectRatio || 'auto');
+    const ratioMatch = requestedRatio.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+    if (ratioMatch) {
+      const expectedRatio = Number(ratioMatch[1]) / Number(ratioMatch[2]);
+      const actualRatio = width / height;
+      const deviation = Math.abs(actualRatio - expectedRatio) / expectedRatio;
+      if (deviation > 0.025) {
+        wallet.settleTask(task.taskId, false, { failCode: 'DELIVERY_RATIO_CHECK_FAILED', width, height, requestedRatio });
+        return res.status(422).json({ ok: false, error: `上游未按 ${requestedRatio} 输出（实际 ${width}×${height}），积分已返还`, wallet: wallet.publicWallet() });
+      }
     }
     const urls = await cacheRemoteResults(task.taskId, task.resultUrls);
     const nextWallet = wallet.settleTask(task.taskId, true, {
