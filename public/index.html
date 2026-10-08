@@ -2352,6 +2352,12 @@ splitGrid=async function(n){
     node.dataset.lastRunPromptHtml=task.promptHtml??node.dataset.promptHtml??'';
     node.dataset.lastRunModelName=task.model||node.dataset.modelName||'GPT Image 2';
     node.dataset.lastRunSizeState=task.sizeState||node.dataset.sizeState||'';
+    // Keep the result card locked to the ratio snapshot used by this task. This is
+    // intentionally based on the queued task instead of the currently open panel,
+    // because the user may select another node while the image is generating.
+    const deliveredRatio=taskParams(task,node).aspectRatio;
+    node.dataset.aspectRatioLabel=deliveredRatio||'自适应';
+    if(deliveredRatio&&deliveredRatio!=='自适应')applyRatioToNodeNow(node,deliveredRatio,{save:false});
     // 第 2 张开始自动建立结果节点，并从生图节点扇出连线。
     displayUrls.slice(1).forEach((url,index)=>{
       const baseX=node.offsetLeft+(node.querySelector('.card')?.offsetWidth||390)+210;
@@ -2664,6 +2670,20 @@ splitGrid=async function(n){
   queueNodeExecution=function(node,options={}){
     if(node?.classList.contains('generation-node')){
       const next={...(options||{})};
+      // A normal click must snapshot the controls that are visible right now. Older
+      // saved nodes may contain a stale dataset.sizeState, which previously caused
+      // the panel to show 9:16 while the request was still sent as an older ratio.
+      const hasLockedSize=next.lockedSizeState!=null&&String(next.lockedSizeState).trim();
+      if(!hasLockedSize){
+        try{
+          const visibleSizeState=JSON.stringify(captureSizeState());
+          next.lockedSizeState=visibleSizeState;
+          node.dataset.sizeState=visibleSizeState;
+          const visibleRatio=currentRatioText();
+          node.dataset.aspectRatioLabel=visibleRatio;
+          applyRatioToNodeNow(node,visibleRatio,{save:false});
+        }catch{}
+      }
       const hasLocked=typeof next.lockedModel==='string'&&next.lockedModel.trim();
       if(!hasLocked){
         const visible=usableVisibleModelV12()||fallbackSupportedModelV12(node);

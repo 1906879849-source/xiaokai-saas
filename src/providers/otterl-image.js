@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const sharp = require('sharp');
 const platformSettings = require('../platform-settings');
 const { generatedDir } = require('../storage-paths');
 
@@ -253,6 +254,7 @@ function publicTask(task) {
     creditsConsumed: task.creditsConsumed ?? null,
     outputWidth: Number(task.outputWidth || 0),
     outputHeight: Number(task.outputHeight || 0),
+    ratioAdjusted: Boolean(task.ratioAdjusted),
     createdAt: Number(task.createdAt || Date.now()),
     finishedAt: Number(task.finishedAt || 0),
   };
@@ -285,7 +287,62 @@ function extensionFromType(type = '') {
   return '.png';
 }
 
-async function cacheResultUrls(taskId, urls) {
+function parsedAspectRatio(value) {
+  const match = String(value || '').match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+  if (!match) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+function greatestCommonDivisor(a, b) {
+  let left = Math.max(1, Math.round(a));
+  let right = Math.max(1, Math.round(b));
+  while (right) [left, right] = [right, left % right];
+  return left;
+}
+
+function canonicalOutputSize(aspectRatio, resolution) {
+  const parsed = parsedAspectRatio(aspectRatio);
+  if (!parsed) return null;
+  const gcd = greatestCommonDivisor(parsed.width, parsed.height);
+  const ratioWidth = Math.round(parsed.width / gcd);
+  const ratioHeight = Math.round(parsed.height / gcd);
+  const longSide = resolution === '4K' ? 4096 : resolution === '2K' ? 2048 : 1024;
+  const unit = Math.max(1, Math.floor(longSide / Math.max(ratioWidth, ratioHeight)));
+  return { width: ratioWidth * unit, height: ratioHeight * unit };
+}
+
+function contentTypeFromFormat(format, fallback = 'image/png') {
+  if (format === 'jpeg' || format === 'jpg') return 'image/jpeg';
+  if (format === 'webp') return 'image/webp';
+  if (format === 'avif') return 'image/avif';
+  if (format === 'gif') return 'image/gif';
+  if (format === 'png') return 'image/png';
+  return fallback;
+}
+
+async function normalizeGeneratedImage(buffer, contentType, task) {
+  const target = canonicalOutputSize(task?.aspectRatio, task?.resolution);
+  if (!target) return { buffer, contentType, adjusted: false };
+  const metadata = await sharp(buffer).metadata();
+  const sourceWidth = Number(metadata.autoOrient?.width || metadata.width || 0);
+  const sourceHeight = Number(metadata.autoOrient?.height || metadata.height || 0);
+  const result = await sharp(buffer)
+    .rotate()
+    .resize(target.width, target.height, { fit: 'cover', position: 'centre' })
+    .toBuffer({ resolveWithObject: true });
+  task.outputWidth = result.info.width;
+  task.outputHeight = result.info.height;
+  task.ratioAdjusted = sourceWidth !== target.width || sourceHeight !== target.height;
+  return {
+    buffer: result.data,
+    contentType: contentTypeFromFormat(result.info.format, contentType),
+    adjusted: task.ratioAdjusted,
+  };
+}
+
+async function cacheResultUrls(taskId, urls, task = null) {
   const cached = [];
   for (let index = 0; index < urls.length; index += 1) {
     const rawSource = String(urls[index] || '').trim();
@@ -321,6 +378,11 @@ async function cacheResultUrls(taskId, urls) {
           buffer = Buffer.from(await response.arrayBuffer());
         }
         if (!buffer?.length) throw new Error('图片内容为空');
+        if (task && task.aspectRatio !== 'auto') {
+          const normalized = await normalizeGeneratedImage(buffer, contentType, task);
+          buffer = normalized.buffer;
+          contentType = normalized.contentType;
+        }
         const digest = crypto.createHash('sha1').update(buffer).digest('hex').slice(0, 12);
         const fileName = `${safeTaskId(taskId)}-${index + 1}-${digest}${extensionFromType(contentType)}`;
         fs.writeFileSync(path.join(GENERATED_DIR, fileName), buffer);
@@ -356,7 +418,7 @@ function cacheTaskResultsInBackground(task) {
   // 缓存成功后再切换为本地 /generated 地址；失败时保留临时地址并由前端确认交付。
   setImmediate(async () => {
     try {
-      const cached = await cacheResultUrls(task.taskId, task.sourceResultUrls);
+      const cached = await cacheResultUrls(task.taskId, task.sourceResultUrls, task);
       if (!cached.length) return;
       task.resultUrls = cached;
       const locallySaved = cached.some(url => String(url).startsWith('/generated/') && hasLocalResult(url));
@@ -488,14 +550,28 @@ async function runTask(task) {
     if (!urls.length) throw new Error('OtterL 返回成功，但没有可用的图片结果');
     task.sourceResultUrls = normalizeResultUrls(urls);
     task.resultUrls = task.sourceResultUrls.slice();
-    // 上游已经成功返回图片并产生费用，按成功任务结算；像素和比例检查只作为交付提示。
+    // Explicit ratios are normalized before success is exposed to the browser. This
+    // prevents a temporary upstream 3:2 image from appearing for a 9:16 request.
+    if (task.aspectRatio !== 'auto') {
+      task.progress = 92;
+      persistTask(task);
+      const cached = await cacheResultUrls(task.taskId, task.sourceResultUrls, task);
+      if (cached.some(url => String(url).startsWith('/generated/') && hasLocalResult(url))) {
+        task.resultUrls = cached;
+        assertRequestedResolution(task);
+        assertRequestedAspectRatio(task);
+      } else {
+        task.failMsg = `图片已生成，但精确 ${task.aspectRatio} 比例的本地处理暂时失败；当前保留上游原图`;
+      }
+    }
+    // 上游已经成功返回图片并产生费用，按成功任务结算。
     task.billingEligible = true;
     task.state = 'success';
     task.progress = 100;
     task.creditsConsumed = json?.usage?.total_tokens ?? json?.usageMetadata?.totalTokenCount ?? null;
     task.finishedAt = Date.now();
     persistTask(task);
-    cacheTaskResultsInBackground(task);
+    if (task.aspectRatio === 'auto') cacheTaskResultsInBackground(task);
   } catch (error) {
     task.state = 'fail';
     task.progress = 100;
@@ -560,7 +636,7 @@ async function getTask(taskId) {
     if (task?.state === 'success' && task.resultUrls?.length) {
       const missingLocalResult = task.resultUrls.some(url => !hasLocalResult(url));
       const recoveryUrls = missingLocalResult && task.sourceResultUrls?.length ? task.sourceResultUrls : task.resultUrls;
-      task.resultUrls = await cacheResultUrls(taskId, recoveryUrls);
+      task.resultUrls = await cacheResultUrls(taskId, recoveryUrls, task);
       persistTask(task);
     }
   }
@@ -601,6 +677,7 @@ async function getTask(taskId) {
     aspectRatio: task.aspectRatio || 'auto',
     outputWidth: Number(task.outputWidth || 0),
     outputHeight: Number(task.outputHeight || 0),
+    ratioAdjusted: Boolean(task.ratioAdjusted),
   };
 }
 

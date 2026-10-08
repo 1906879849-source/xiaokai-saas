@@ -551,7 +551,7 @@ app.post('/api/image/generate', async (req, res) => {
           modelName,
           prompt,
           aspectRatio: body.aspectRatio,
-          resolution: body.resolution,
+          resolution: requestedResolution,
           imageUrls,
           maskUrl: mask,
           background: body.background,
