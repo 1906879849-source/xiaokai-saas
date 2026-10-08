@@ -32,6 +32,7 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (!origin || origin === 'null' || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    if (origin && origin !== 'null') res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Idempotency-Key');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
@@ -652,7 +653,16 @@ app.get('/api/task/:taskId/image', async (req, res) => {
     const timeout = setTimeout(() => controller.abort(), 45000);
     let response;
     try {
-      response = await fetch(sourceUrl, { signal: controller.signal });
+      const headers = { Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8', 'User-Agent': 'Mozilla/5.0 kai-image-download/1.0' };
+      if (taskApi === 'otterl') {
+        try {
+          const otterlOrigin = new URL(process.env.OTTERL_BASE_URL || 'https://otterl.com/v1').origin;
+          if (new URL(sourceUrl).origin === otterlOrigin && String(process.env.OTTERL_API_KEY || '').trim()) {
+            headers.Authorization = `Bearer ${String(process.env.OTTERL_API_KEY).trim()}`;
+          }
+        } catch {}
+      }
+      response = await fetch(sourceUrl, { signal: controller.signal, redirect: 'follow', headers });
     } finally {
       clearTimeout(timeout);
     }
