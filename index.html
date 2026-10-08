@@ -2498,7 +2498,10 @@ splitGrid=async function(n){
   }
   async function pollProviderTasks(providerTasks,task,node,controller){
     const states=new Map(providerTasks.map(x=>[x.taskId,{state:'waiting',urls:[]}]))
-    const deadline=Date.now()+8*60*1000;
+    // The server may keep an upstream image edit request open for as long as 12
+    // minutes. Keep the browser alive slightly longer so a slow success is not
+    // incorrectly changed into a local failure at the old 8-minute boundary.
+    const deadline=Date.now()+13*60*1000;
     while(Date.now()<deadline){
       if(controller.signal.aborted)throw new DOMException('Aborted','AbortError');
       let allTerminal=true;
@@ -2515,9 +2518,10 @@ splitGrid=async function(n){
       const uploading=list.filter(x=>x.state==='uploading'||x.state==='preparing').length;
       const waiting=list.filter(x=>x.state==='waiting'||x.state==='queuing').length;
       task.phase=uploading?'uploading':generating?'generating':'uploading';
+      const slowUpstream=generating&&task.startedAt&&Date.now()-task.startedAt>3*60*1000;
       task.note=uploading
         ? ('正在上传参考图 '+uploading+'/'+providerTasks.length+'；完成后上游才会出现记录')
-        : generating?('上游生成中 '+generating+'/'+providerTasks.length):('上游排队中 '+waiting+'/'+providerTasks.length);
+        : generating?(slowUpstream?('上游已接收，处理较慢 '+generating+'/'+providerTasks.length+'；请勿重复提交'):('上游生成中 '+generating+'/'+providerTasks.length)):('上游排队中 '+waiting+'/'+providerTasks.length);
       const progressValues=list.map(x=>Number(x.progress||0)).filter(Number.isFinite);
       if(progressValues.length)task.progress=Math.round(progressValues.reduce((a,b)=>a+b,0)/progressValues.length);
       setNodeStatus(node,'running',task.phase==='generating'?'生成中':'上传中');
@@ -2525,8 +2529,16 @@ splitGrid=async function(n){
       if(allTerminal)break;
       await delay(providerTasks.some(x=>x.taskApi==='mock')?250:providerTasks.some(x=>x.taskApi==='otterl')?800:2600,controller.signal);
     }
+    // Do one last authoritative read at the deadline. The result may have become
+    // ready between the last polling tick and the deadline.
+    for(const item of providerTasks){
+      const prev=states.get(item.taskId)||{};
+      if(prev.state==='success'||prev.state==='fail')continue;
+      const taskApi=item.taskApi==='gpt4o'?'?api=gpt4o':item.taskApi==='mock'?'?api=mock':item.taskApi==='otterl'?'?api=otterl':'';
+      try{states.set(item.taskId,await apiFetch('/api/task/'+encodeURIComponent(item.taskId)+taskApi,{controller,timeoutMs:45000}))}catch{}
+    }
     const list=[...states.values()];
-    if(list.some(x=>x.state!=='success'&&x.state!=='fail'))throw new Error('等待图片生成任务超时（8 分钟）');
+    if(list.some(x=>x.state!=='success'&&x.state!=='fail'))throw new Error('等待图片生成任务超时（13 分钟），可稍后使用“找回结果”；请勿重复提交');
     const successes=list.filter(x=>x.state==='success');
     const failures=list.filter(x=>x.state==='fail');
     const urls=successes.flatMap(x=>Array.isArray(x.urls)?x.urls:[]);
@@ -2594,6 +2606,13 @@ splitGrid=async function(n){
       else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
       if(task.status==='canceled')return;
+      // Recovery may finish while the original long poll is unwinding. Never let
+      // that stale timeout cover an already restored image with a failure panel.
+      if(node.dataset.providerRecoveryState==='done'){
+        task.status='done';task.phase='success';task.note='生成成功（已自动找回）';task.errorReason='';
+        task.finishedAt=Date.now();task.durationMs=task.finishedAt-(task.startedAt||started);
+        clearGenerationFailure(node);setNodeStatus(node,'done','已恢复');return;
+      }
       const failedPhase=task.phase;
       const timeoutReason=error?.name==='AbortError'
         ? (task.providerTaskIds?.length?'等待上游任务响应超时，请稍后重试或使用“找回结果”':'提交图片任务超时，可能是参考图上传失败或图片服务未响应')
@@ -2934,7 +2953,16 @@ splitGrid=async function(n){
       delete node.__kaiRecoveryFailedAt;
       const restoredImage=node.querySelector('.uploaded-image');
       watchRecoveredImage(node,restoredImage);
+      // Reconcile the original queue row. Previously the 8-minute local timeout
+      // remained red even after recovery had proved that the same provider task
+      // succeeded, which made a successful image look like a failed generation.
+      const recoveredIds=new Set(providerTasks.map(item=>item.taskId).filter(Boolean));
+      workflowQueue.filter(item=>item.nodeId===node.id&&Array.isArray(item.providerTaskIds)&&item.providerTaskIds.some(id=>recoveredIds.has(id))).forEach(item=>{
+        item.status='done';item.phase=delivery.warnings?.length?'warning':'success';item.note='生成成功（已自动找回）';item.errorReason='';item.finishedAt=item.finishedAt||Date.now();
+      });
+      runtime.clearGenerationFailure?.(node);
       setNodeStatus(node,'done',delivery.warnings?.length?'已恢复·规格提示':'已恢复');
+      renderTaskQueue();
       await saveProject();
       if(!quiet)note(legacy?'已找回刷新前生成的图片':'已自动恢复生成结果');
       return true;
