@@ -892,8 +892,18 @@ app.post('/api/callback/kie', (req, res) => {
 });
 
 app.use('/generated', express.static(GENERATED_DIR, { maxAge: '7d' }));
-app.use(express.static(PUBLIC_DIR));
-app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
+// Application files must never stay on an older build after Railway deploys.
+// Generated images keep their long cache above; HTML/JS/CSS always revalidate.
+app.use(express.static(PUBLIC_DIR, {
+  etag: false,
+  lastModified: false,
+  maxAge: 0,
+  setHeaders(res) { res.setHeader('Cache-Control', 'no-store, max-age=0'); },
+}));
+app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
 
 // Railway and other container platforms must listen on every network interface.
 // Binding to 0.0.0.0 also works locally and prevents a stale HOST=127.0.0.1

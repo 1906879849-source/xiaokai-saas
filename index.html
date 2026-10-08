@@ -923,7 +923,45 @@
     }
   }
   let projectSaveChain=Promise.resolve();
-  async function persistProjectNow(){try{const data=serializeProject();data.id=activeProjectId;await dbWrite('project:'+activeProjectId,data);await dbWrite('current',data);let index=await dbRead('project-index')||[];const item={id:activeProjectId,name:data.name,updatedAt:Date.now(),nodes:data.nodes.length};index=[item,...index.filter(x=>x.id!==activeProjectId)].slice(0,40);await dbWrite('project-index',index);updateSaveMeta(cloudAuthState===true?'已云端保存':'已本地保存')}catch(error){updateSaveMeta('保存失败');note('画布保存失败：'+error.message)}}
+  let pendingCloudSaveBatch=null,cloudSaveRunning=false;
+  function queueCanvasCloudSave(entries){
+    if(cloudAuthState===false)return;
+    // Keep only the newest complete canvas snapshot. Dragging nodes can trigger many
+    // autosaves; uploading every intermediate snapshot creates a long request queue.
+    pendingCloudSaveBatch=entries;
+    if(cloudSaveRunning)return;
+    cloudSaveRunning=true;
+    (async()=>{
+      while(pendingCloudSaveBatch){
+        const batch=pendingCloudSaveBatch;pendingCloudSaveBatch=null;
+        try{
+          await Promise.all(batch.map(([key,value])=>cloudRequest('PUT',key,value)));
+          updateSaveMeta('已云端保存');
+        }catch(error){
+          console.warn('[canvas cloud save]',error?.message||error);
+          updateSaveMeta('已本地保存·云端待同步');
+          // A later edit/login/reconnect will enqueue the newest complete snapshot.
+        }
+      }
+    })().finally(()=>{cloudSaveRunning=false;if(pendingCloudSaveBatch)queueCanvasCloudSave(pendingCloudSaveBatch)});
+  }
+  async function persistProjectNow(){
+    try{
+      const data=serializeProject();data.id=activeProjectId;
+      const projectKey='project:'+activeProjectId;
+      await localDbWrite(projectKey,data);
+      await localDbWrite('current',data);
+      let index=await localDbRead('project-index')||[];
+      const item={id:activeProjectId,name:data.name,updatedAt:Date.now(),nodes:data.nodes.length};
+      index=[item,...index.filter(x=>x.id!==activeProjectId)].slice(0,40);
+      await localDbWrite('project-index',index);
+      updateSaveMeta(cloudAuthState===false?'已本地保存':'已本地保存·云端同步中');
+      queueCanvasCloudSave([[projectKey,data],['current',data],['project-index',index]]);
+    }catch(error){
+      updateSaveMeta('本地保存失败');
+      note('画布本地保存失败：'+(error?.message||'未知错误'));
+    }
+  }
   function saveProject(){projectSaveChain=projectSaveChain.catch(()=>{}).then(persistProjectNow);return projectSaveChain}
   async function loadSavedProject(){try{const saved=await dbRead('project:'+activeProjectId)||await dbRead('current');if(saved)restoreProject(saved);else updateSaveMeta()}catch(error){isRestoring=false;console.error('本地画布读取失败',error);updateSaveMeta('可继续使用');note('本地缓存恢复异常，已保留当前画布')}}
   function exportProject(){const data=serializeProject(),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(data.name||'xiaokai画布')+'.xiaokai.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);note('画布备份已导出')}
@@ -2535,6 +2573,10 @@ splitGrid=async function(n){
     return true;
   };
   processWorkflowQueue=async function(){
+    const activeTask=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
+    if(workflowActiveTask&&!activeTask)workflowActiveTask=null;
+    const activeGeneration=workflowQueue.some(task=>task.status==='running'&&task.type==='generation');
+    if(realQueueBusy&&!activeGeneration)realQueueBusy=false;
     if(realQueueBusy||workflowActiveTask)return;
     const next=workflowQueue.find(t=>t.status==='pending');
     if(!next)return;
@@ -2551,6 +2593,15 @@ splitGrid=async function(n){
       workflowActiveTask=null;realQueueBusy=false;renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,100)
     }
   };
+  // Recover automatically if an older build, refresh, or aborted request left only a
+  // stale runtime lock while visible tasks are still waiting.
+  if(!window.__kaiQueueWatchdog){
+    window.__kaiQueueWatchdog=setInterval(()=>{
+      const active=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
+      if(workflowActiveTask&&!active)workflowActiveTask=null;
+      if(workflowQueue.some(task=>task.status==='pending')&&!workflowActiveTask)processWorkflowQueue();
+    },1000);
+  }
 
   // 启动时检查后端是否在线；不会读取或暴露 Kie Key。
   requestAnimationFrame(()=>{
