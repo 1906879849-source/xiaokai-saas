@@ -700,4 +700,7 @@ async function getTask(taskId) {
   };
 }
 
-module.exports = { configured, supportsModel, createImageTask, getTask, getPublicPricing };
+// The HTTP delivery route uses the same normalizer as the background cache. This
+// guarantees the selected ratio even when saving the upstream temporary URL to
+// Railway storage failed and the route must proxy the original image directly.
+module.exports = { configured, supportsModel, createImageTask, getTask, getPublicPricing, normalizeDeliveryImage: normalizeGeneratedImage };

@@ -632,6 +632,38 @@ app.get('/api/task/:taskId', async (req, res) => {
   }
 });
 
+function imageContentTypeFromPath(filePath = '') {
+  const ext = path.extname(String(filePath)).toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.avif') return 'image/avif';
+  return 'image/png';
+}
+
+async function normalizedDelivery(task, selectedProvider, buffer, contentType) {
+  const explicitRatio = task?.aspectRatio && task.aspectRatio !== 'auto';
+  if (!explicitRatio || selectedProvider.name !== 'otterl' || typeof selectedProvider.client.normalizeDeliveryImage !== 'function') {
+    return { buffer, contentType };
+  }
+  try {
+    return await selectedProvider.client.normalizeDeliveryImage(buffer, contentType, task);
+  } catch (error) {
+    const deliveryError = new Error(`图片已经生成，但 ${task.aspectRatio} 比例校正失败：${error?.message || '无法处理图片'}`);
+    deliveryError.statusCode = 502;
+    throw deliveryError;
+  }
+}
+
+async function sendDeliveredImage(res, task, selectedProvider, buffer, contentType) {
+  const delivered = await normalizedDelivery(task, selectedProvider, buffer, contentType);
+  if (!delivered.buffer?.length) throw Object.assign(new Error('图片处理后内容为空'), { statusCode: 502 });
+  res.setHeader('Content-Type', delivered.contentType || contentType || 'image/png');
+  res.setHeader('Content-Length', String(delivered.buffer.length));
+  res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
+  return res.send(delivered.buffer);
+}
+
 // Generated images are frequently returned from a different origin. Browsers ignore
 // the download attribute for those URLs and open the image instead. Proxy only an
 // image that belongs to the signed-in user's task so the canvas can download/export
@@ -655,6 +687,9 @@ app.get('/api/task/:taskId/image', async (req, res) => {
       const fileName = path.basename(decodeURIComponent(sourceUrl.slice('/generated/'.length)));
       const filePath = path.join(GENERATED_DIR, fileName);
       if (!fs.existsSync(filePath)) return res.status(404).json({ ok: false, error: '本地图片文件已丢失，请使用找回结果' });
+      if (taskApi === 'otterl' && task.aspectRatio && task.aspectRatio !== 'auto') {
+        return sendDeliveredImage(res, task, selectedProvider, fs.readFileSync(filePath), imageContentTypeFromPath(filePath));
+      }
       res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
       return res.sendFile(filePath);
     }
@@ -664,10 +699,7 @@ app.get('/api/task/:taskId/image', async (req, res) => {
       const buffer = Buffer.from(dataImage[2].replace(/\s+/g, ''), 'base64');
       if (!buffer.length) return res.status(404).json({ ok: false, error: '图片数据为空' });
       if (buffer.length > 80 * 1024 * 1024) return res.status(413).json({ ok: false, error: '图片超过 80MB，无法在画布中导出' });
-      res.setHeader('Content-Type', dataImage[1]);
-      res.setHeader('Content-Length', String(buffer.length));
-      res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
-      return res.send(buffer);
+      return sendDeliveredImage(res, task, selectedProvider, buffer, dataImage[1]);
     }
 
     if (!/^https?:\/\//i.test(sourceUrl)) {
@@ -694,10 +726,7 @@ app.get('/api/task/:taskId/image', async (req, res) => {
     const buffer = Buffer.from(await response.arrayBuffer());
     if (!buffer.length) throw Object.assign(new Error('上游返回了空图片'), { statusCode: 502 });
     if (buffer.length > 80 * 1024 * 1024) throw Object.assign(new Error('图片超过 80MB，无法在画布中导出'), { statusCode: 413 });
-    res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
-    res.setHeader('Content-Length', String(buffer.length));
-    res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
-    res.send(buffer);
+    return sendDeliveredImage(res, task, selectedProvider, buffer, response.headers.get('content-type') || 'application/octet-stream');
   } catch (error) {
     safeJsonError(res, error);
   }
