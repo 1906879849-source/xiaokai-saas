@@ -631,7 +631,7 @@ app.get('/api/task/:taskId/image', async (req, res) => {
       const fileName = path.basename(decodeURIComponent(sourceUrl.slice('/generated/'.length)));
       const filePath = path.join(GENERATED_DIR, fileName);
       if (!fs.existsSync(filePath)) return res.status(404).json({ ok: false, error: '本地图片文件已丢失，请使用找回结果' });
-      res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
       return res.sendFile(filePath);
     }
 
@@ -642,7 +642,7 @@ app.get('/api/task/:taskId/image', async (req, res) => {
       if (buffer.length > 80 * 1024 * 1024) return res.status(413).json({ ok: false, error: '图片超过 80MB，无法在画布中导出' });
       res.setHeader('Content-Type', dataImage[1]);
       res.setHeader('Content-Length', String(buffer.length));
-      res.setHeader('Cache-Control', 'private, max-age=3600');
+      res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
       return res.send(buffer);
     }
 
@@ -672,7 +672,7 @@ app.get('/api/task/:taskId/image', async (req, res) => {
     if (buffer.length > 80 * 1024 * 1024) throw Object.assign(new Error('图片超过 80MB，无法在画布中导出'), { statusCode: 413 });
     res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
     res.setHeader('Content-Length', String(buffer.length));
-    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
     res.send(buffer);
   } catch (error) {
     safeJsonError(res, error);

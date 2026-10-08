@@ -813,7 +813,7 @@
   async function exportPreview(size){if(!previewNode||!requireRealImage(previewNode))return;try{const blob=await downloadableImageBlob(previewNode);if(size==='original'){triggerBlobDownload(blob,safeDownloadName(previewCaption.textContent||'KAI图片')+'.'+imageExtension(blob));note('原图已下载');return}const objectUrl=URL.createObjectURL(blob);try{const source=await loadImageSource(objectUrl),max=size==='4k'?4096:2048,scale=max/Math.max(source.naturalWidth,source.naturalHeight),c=document.createElement('canvas');c.width=Math.max(1,Math.round(source.naturalWidth*scale));c.height=Math.max(1,Math.round(source.naturalHeight*scale));const context=c.getContext('2d');context.imageSmoothingEnabled=true;context.imageSmoothingQuality='high';context.drawImage(source,0,0,c.width,c.height);const exported=await canvasBlob(c,'image/png');triggerBlobDownload(exported,safeDownloadName(previewCaption.textContent||'KAI图片')+'-'+size.toUpperCase()+'.png');note(size.toUpperCase()+' 图片已下载（'+c.width+' × '+c.height+'）')}finally{URL.revokeObjectURL(objectUrl)}}catch(error){note('导出失败：'+(error?.message||'未知错误'))}}
   const imageActions='<div class="node-actions"><button data-tool="expand">扩图</button><button data-tool="cutout">抠图</button><button data-tool="multi">多角度</button><button data-tool="erase">消除笔</button><button data-tool="crop">构图裁剪</button><button data-tool="grid">宫格切分</button><button data-tool="smart">智能改图</button><button data-tool="download">↓</button></div>';
   function requireRealImage(n){const img=n.querySelector('.uploaded-image');if(!img)note('此演示占位图没有原始文件，请先上传真实图片');return img}
-  function revealImageAtomically(img,card=img?.closest('.card')){if(!img||!card)return;const source=img.currentSrc||img.src;if(!source)return;const finish=async()=>{try{if(typeof img.decode==='function')await img.decode()}catch{}if((img.currentSrc||img.src)!==source||!img.naturalWidth)return;requestAnimationFrame(()=>{if((img.currentSrc||img.src)!==source)return;img.classList.remove('kai-awaiting-image');card.classList.remove('kai-awaiting-image')})};const fail=()=>{img.classList.remove('kai-awaiting-image');card.classList.remove('kai-awaiting-image')};img.classList.add('kai-awaiting-image');card.classList.add('kai-awaiting-image');img.addEventListener('load',finish,{once:true});img.addEventListener('error',fail,{once:true});if(img.complete&&img.naturalWidth)finish()}
+  function revealImageAtomically(img,card=img?.closest('.card')){if(!img||!card)return;if(img.complete&&img.naturalWidth){img.classList.remove('kai-awaiting-image');card.classList.remove('kai-awaiting-image');return}const source=img.currentSrc||img.src;if(!source)return;const finish=async()=>{try{if(typeof img.decode==='function')await img.decode()}catch{}if((img.currentSrc||img.src)!==source||!img.naturalWidth)return;requestAnimationFrame(()=>{if((img.currentSrc||img.src)!==source)return;img.classList.remove('kai-awaiting-image');card.classList.remove('kai-awaiting-image')})};const fail=()=>{img.classList.remove('kai-awaiting-image');card.classList.remove('kai-awaiting-image')};img.classList.add('kai-awaiting-image');card.classList.add('kai-awaiting-image');img.addEventListener('load',finish,{once:true});img.addEventListener('error',fail,{once:true})}
   function prepareNodeImagesForAtomicReveal(n){n?.querySelectorAll('.uploaded-image').forEach(img=>revealImageAtomically(img,img.closest('.card')))}
   function openApiTool(n,tool){selectNode(n);const names={smart:'智能改图',expand:'扩图',multi:'多角度',prompt:'提示词反推'};dock.dataset.operation=tool;promptBox.placeholder=tool==='prompt'?'接入视觉模型 API 后，将自动反推当前图片提示词':'输入'+names[tool]+'要求……';promptBox.focus();note(names[tool]+'已就绪，执行前需要配置对应 API')}
   async function openEditor(n,mode){const img=requireRealImage(n);if(!img)return;editorNode=n;editorMode=mode;editorRatio='free';editorHasEraseMarks=false;editorImage=new Image();editorImage.src=img.src;await editorImage.decode();document.getElementById('editorTitle').textContent=mode==='erase'?'AI 消除笔 · 涂抹要移除的区域':'构图裁剪';document.getElementById('editorApply').textContent=mode==='erase'?'AI 消除':'应用';document.getElementById('brushControl').hidden=mode!=='erase';document.getElementById('cropControls').hidden=mode!=='crop';document.querySelectorAll('#cropControls button').forEach((b,i)=>b.classList.toggle('on',i===0));redrawEditor();toolEditor.classList.add('open')}
@@ -863,7 +863,8 @@
   function triggerBlobDownload(blob,fileName){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}
   function providerTaskForImage(n,img){const candidates=[n,...document.querySelectorAll('[data-provider-tasks]')];for(const owner of candidates){let tasks=[],urls=[];try{tasks=JSON.parse(owner?.dataset?.providerTasks||'[]')}catch{}try{urls=JSON.parse(owner?.dataset?.outputUrls||'[]')}catch{}if(!Array.isArray(tasks)||!tasks.length)continue;let index=urls.findIndex(url=>String(url)===String(img.src)||String(img.src).endsWith(String(url)));if(index<0&&owner===n)index=0;if(index<0)continue;const task=tasks[Math.min(index,tasks.length-1)];if(task?.taskId)return{...task,index:0}}return null}
   function downloadBackendBase(){const saved=(localStorage.getItem('xiaokai-backend-url')||'').trim().replace(/\/$/,'');if(saved)return saved;if(location.protocol==='http:'||location.protocol==='https:'){if(location.hostname==='127.0.0.1'||location.hostname==='localhost')return location.port==='4318'?'':'http://127.0.0.1:4318';return''}return'http://127.0.0.1:4318'}
-  async function downloadableImageBlob(n){const img=requireRealImage(n);if(!img)throw new Error('没有可下载的图片');const task=providerTaskForImage(n,img);let source=img.src;if(task){const api=task.taskApi==='gpt4o'?'gpt4o':task.taskApi==='mock'?'mock':task.taskApi==='otterl'?'otterl':'market';source=downloadBackendBase()+'/api/task/'+encodeURIComponent(task.taskId)+'/image?api='+encodeURIComponent(api)+'&index='+encodeURIComponent(task.index||0)}let response;try{response=await fetch(source,{credentials:'include',cache:'no-store'})}catch(error){throw new Error('无法连接生图后端，请确认服务已更新')}if(!response.ok){let message='HTTP '+response.status;try{const data=await response.json();message=data.error||message}catch{}throw new Error(message)}const contentType=String(response.headers.get('content-type')||'');if(contentType.includes('text/html')||contentType.includes('application/json'))throw new Error('下载接口返回的不是图片，请部署最新后端');const blob=await response.blob();if(!blob.size)throw new Error('下载到的图片为空');return blob}
+  function taskImageUrl(task,index=0){if(!task?.taskId)return'';const api=task.taskApi==='gpt4o'?'gpt4o':task.taskApi==='mock'?'mock':task.taskApi==='otterl'?'otterl':'market';return downloadBackendBase()+'/api/task/'+encodeURIComponent(task.taskId)+'/image?api='+encodeURIComponent(api)+'&index='+encodeURIComponent(index)}
+  async function downloadableImageBlob(n){const img=requireRealImage(n);if(!img)throw new Error('没有可下载的图片');const task=providerTaskForImage(n,img);let source=img.src;if(task)source=taskImageUrl(task,task.index||0);let response;try{response=await fetch(source,{credentials:'include'})}catch(error){throw new Error('无法连接生图后端，请确认服务已更新')}if(!response.ok){let message='HTTP '+response.status;try{const data=await response.json();message=data.error||message}catch{}throw new Error(message)}const contentType=String(response.headers.get('content-type')||'');if(contentType.includes('text/html')||contentType.includes('application/json'))throw new Error('下载接口返回的不是图片，请部署最新后端');const blob=await response.blob();if(!blob.size)throw new Error('下载到的图片为空');return blob}
   async function downloadImage(n){const img=requireRealImage(n);if(!img)return;try{const blob=await downloadableImageBlob(n),name=safeDownloadName(n.querySelector('.node-label')?.textContent||'KAI图片');triggerBlobDownload(blob,name+'.'+imageExtension(blob));note('原图已下载')}catch(error){note('下载失败：'+(error?.message||'未知错误'))}}
   function handleImageTool(tool,n){if(tool==='smart'||tool==='expand'||tool==='multi'||tool==='prompt')return openApiTool(n,tool);if(tool==='hd')return upscaleImage(n);if(tool==='cutout')return removeBackground(n);if(tool==='erase'||tool==='crop')return openEditor(n,tool);if(tool==='grid')return splitGrid(n);if(tool==='marker')return enableMarker(n);if(tool==='replace'){replacingNode=n;document.getElementById('replaceImageUpload').click();return}if(tool==='preview')return openImagePreview(n);if(tool==='download')return downloadImage(n)}
   function bindEdge(path){path.onclick=e=>{e.preventDefault();e.stopPropagation();selectedEdge=path;deleteEdge(path)};path.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();selectedEdge=path;document.querySelectorAll('.wire path').forEach(p=>p.classList.remove('edge-selected'));path.classList.add('edge-selected');selectedNodes.clear();selectedNode=null;dock.classList.remove('open');updateSelectionBar();const rect=canvas.getBoundingClientRect(),edgeMenu=document.getElementById('edgeMenu');edgeMenu.style.left=Math.min(canvas.clientWidth-220,e.clientX-rect.left)+'px';edgeMenu.style.top=Math.min(canvas.clientHeight-100,e.clientY-rect.top)+'px';edgeMenu.classList.add('open')}}
@@ -1221,9 +1222,29 @@ const atomicImageObserver=new MutationObserver(mutations=>{
     });
   });
   images.forEach(image=>revealImageAtomically(image,image.closest('.card')));
+  if(images.size)scheduleStableGeneratedImages();
 });
 atomicImageObserver.observe(world,{childList:true,subtree:true,attributes:true,attributeFilter:['src']});
 document.querySelectorAll('.node').forEach(prepareNodeImagesForAtomicReveal);
+let stableGeneratedImageTimer=null;
+function scheduleStableGeneratedImages(){clearTimeout(stableGeneratedImageTimer);stableGeneratedImageTimer=setTimeout(stabilizeGeneratedImageSources,120)}
+function stabilizeGeneratedImageSources(){
+  const mappings=new Map(),owners=[...document.querySelectorAll('.generation-node[data-provider-tasks]')];
+  owners.forEach(owner=>{
+    let tasks=[],urls=[];try{tasks=JSON.parse(owner.dataset.providerTasks||'[]')}catch{}try{urls=JSON.parse(owner.dataset.outputUrls||'[]')}catch{}
+    if(!Array.isArray(tasks)||!tasks.length)return;
+    urls.forEach((oldUrl,index)=>{const stable=taskImageUrl(tasks[Math.min(index,tasks.length-1)],0);if(stable&&oldUrl&&!String(oldUrl).includes('/api/task/')){try{mappings.set(new URL(oldUrl,location.href).href,stable)}catch{mappings.set(String(oldUrl),stable)}}});
+    const ownImage=owner.querySelector('.uploaded-image');
+    if(ownImage&&tasks[0]&&!ownImage.src.includes('/api/task/'))mappings.set(ownImage.src,taskImageUrl(tasks[0],0));
+  });
+  if(!mappings.size)return;
+  let changed=false;
+  document.querySelectorAll('.node .uploaded-image').forEach(image=>{const stable=mappings.get(image.src);if(stable&&image.src!==stable){image.src=stable;changed=true}});
+  owners.forEach(owner=>{let urls=[];try{urls=JSON.parse(owner.dataset.outputUrls||'[]')}catch{}if(!Array.isArray(urls))return;const next=urls.map(url=>{try{return mappings.get(new URL(url,location.href).href)||url}catch{return mappings.get(String(url))||url}});if(JSON.stringify(next)!==JSON.stringify(urls)){owner.dataset.outputUrls=JSON.stringify(next);changed=true}});
+  if(changed)scheduleSave();
+}
+setTimeout(stabilizeGeneratedImageSources,700);
+setTimeout(stabilizeGeneratedImageSources,2200);
 const dockVariablesEl=document.getElementById('dockVariables');
 const taskQueuePanelEl=document.getElementById('taskQueue');
 const taskQueueListEl=document.getElementById('taskQueueList');
@@ -1232,6 +1253,39 @@ let workflowQueue=[];
 let workflowActiveTask=null;
 let workflowTaskId=0;
 let lastPointerWorld={x:(canvas.clientWidth/2-panX)/zoom,y:(canvas.clientHeight/2-panY)/zoom};
+
+function fitCompareNodeToImage(compareNode,image){
+  const card=compareNode?.querySelector('.compare-card');if(!card||!image)return;
+  const apply=()=>{
+    const ratio=image.naturalWidth/Math.max(1,image.naturalHeight);if(!Number.isFinite(ratio)||ratio<=0)return;
+    let width,height;
+    if(ratio>1.05){width=680;height=width/ratio}
+    else if(ratio<.95){height=620;width=height*ratio}
+    else{width=540;height=540}
+    if(width>720){const scale=720/width;width*=scale;height*=scale}
+    if(height>620){const scale=620/height;width*=scale;height*=scale}
+    if(width<260){const scale=260/width;width*=scale;height*=scale}
+    if(height<230){const scale=230/height;width*=scale;height*=scale}
+    width=Math.round(width);height=Math.round(height);
+    if(card.style.width===width+'px'&&card.style.height===height+'px')return;
+    card.style.width=width+'px';card.style.height=height+'px';
+    compareNode.dataset.compareAutoRatio=String(ratio);
+    syncNodeChrome(compareNode);wires();positionNodeUI(compareNode);queueMiniMapRender();scheduleSave();
+  };
+  if(image.complete&&image.naturalWidth)apply();else image.addEventListener('load',()=>{apply();updateCompareNodes()},{once:true});
+}
+updateCompareNodes=function(){
+  document.querySelectorAll('.compare-node').forEach(node=>{
+    const stage=node.querySelector('.compare-stage');if(!stage)return;
+    const incoming=[...document.querySelectorAll(`.wire path[data-b="${node.id}"]`)].map(path=>document.getElementById(path.dataset.a)).filter(Boolean).slice(0,2);
+    const images=incoming.map(source=>source.querySelector('.uploaded-image')).filter(Boolean);
+    if(images[0])fitCompareNodeToImage(node,images[0]);
+    stage.replaceChildren();
+    if(images.length<2){const empty=document.createElement('div');empty.className='compare-empty';empty.innerHTML='已连接 '+incoming.length+' / 2 张图片<br>请连接两张已上传图片';stage.appendChild(empty);return}
+    const bottom=images[0].cloneNode(),top=images[1].cloneNode(),divider=document.createElement('span'),slider=document.createElement('input');
+    bottom.removeAttribute('class');top.removeAttribute('class');bottom.className='compare-bottom';top.className='compare-top';divider.className='compare-divider';slider.className='compare-slider';slider.type='range';slider.min='0';slider.max='100';slider.value='50';stage.append(bottom,top,divider,slider);bindCompareNode(node)
+  })
+};
 
 function strippedNodeName(n){return n?.querySelector('.node-label')?.textContent?.trim().replace(/^[^　]+　?/,'')||'未命名节点'}
 function ensureNodeStatus(n){if(!n)return null;let badge=n.querySelector(':scope > .node-status');if(!badge){badge=document.createElement('div');badge.className='node-status';badge.dataset.state='idle';badge.innerHTML='<span class="dot"></span><span class="text">就绪</span>';n.appendChild(badge)}return badge}
@@ -2400,18 +2454,20 @@ splitGrid=async function(n){
   }
   function applyRealResults(node,urls,resolvedPrompt,task){
     if(!urls.length)throw new Error('生成任务返回成功，但没有找到图片 URL');
+    const providerTasks=Array.isArray(task.providerTasks)?task.providerTasks:[];
+    const displayUrls=urls.map((url,index)=>providerTasks.length?taskImageUrl(providerTasks[Math.min(index,providerTasks.length-1)],0):url);
     // 第一张直接显示在生图节点中，让“重新生成 / 生成变体”继续可用。
     const providerName=task.provider==='mock'?'Mock':'Kie';
-    applyGenerationOutput(node,{items:[],texts:[],images:[{kind:'image',label:providerName+' 输出',value:urls[0]}]},resolvedPrompt);
+    applyGenerationOutput(node,{items:[],texts:[],images:[{kind:'image',label:providerName+' 输出',value:displayUrls[0]}]},resolvedPrompt);
     node.dataset.realProvider=task.provider||'kie';
     node.dataset.realApiVersion=REAL_API_VERSION;
-    node.dataset.outputUrls=JSON.stringify(urls);
+    node.dataset.outputUrls=JSON.stringify(displayUrls);
     node.dataset.lastRunPromptText=task.promptText??node.dataset.promptText??resolvedPrompt;
     node.dataset.lastRunPromptHtml=task.promptHtml??node.dataset.promptHtml??'';
     node.dataset.lastRunModelName=task.model||node.dataset.modelName||'GPT Image 2';
     node.dataset.lastRunSizeState=task.sizeState||node.dataset.sizeState||'';
     // 第 2 张开始自动建立结果节点，并从生图节点扇出连线。
-    urls.slice(1).forEach((url,index)=>{
+    displayUrls.slice(1).forEach((url,index)=>{
       const baseX=node.offsetLeft+(node.querySelector('.card')?.offsetWidth||390)+210;
       const baseY=node.offsetTop+(index*78);
       createDerivedImageNode(node,url,'生成结果 '+(index+2),{fit:true,x:baseX,y:baseY,name:getCleanNodeName(node)+' · 结果 '+(index+2)});
@@ -2832,6 +2888,7 @@ splitGrid=async function(n){
       id:'recovery-'+Date.now(),nodeId:node.id,name:strippedNodeName(node),type:'generation',status:'running',phase:'generating',
       note:'正在找回生成结果',createdAt:Number(node.dataset.providerSubmittedAt||Date.now()),
       provider:providerTasks.some(x=>x.taskApi==='mock')?'mock':providerTasks.some(x=>x.taskApi==='otterl')?'otterl':'kie',
+      providerTasks,
       model:node.dataset.providerModel||node.dataset.modelName||'GPT Image 2',
       sizeState:node.dataset.providerSizeState||node.dataset.sizeState||'',
       promptText:node.dataset.providerPrompt||node.dataset.promptText||'',promptHtml:node.dataset.promptHtml||''
