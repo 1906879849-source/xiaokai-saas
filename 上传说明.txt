@@ -1,21 +1,17 @@
-本次更新用于保障 AI 对话与生图节点的客户积分结算。
+把本文件夹里面的以下内容拖到 GitHub 仓库 xiaokai-saas 的根目录上传：
 
-请按原目录覆盖上传以下 3 个文件：
-1. server.js
-2. src/wallet.js
-3. src/providers/otterl-image.js
+public 文件夹
+src 文件夹
+server.js
+package.json
+package-lock.json
 
-更新后的规则：
-- AI 对话和生图任务提交前先冻结客户积分。
-- 上游成功生成内容后正式扣除客户积分。
-- 上游明确失败才返还冻结积分。
-- 客户刷新、关闭页面或网络中断，不影响后台成功任务结算。
-- 重复查询、找回结果不会重复扣分。
-- Agent 实际 token 费用高于预冻结金额时完整记账，余额不足会显示负数并阻止继续消费，避免平台替客户承担差额。
-- 生图结果即使暂时只能使用上游临时地址，后台仍按已成功生成结算，不会因为客户关闭页面而免单。
+GitHub 提示同名文件时，确认覆盖并提交到 main 分支。
+不要把外层“KAI画布V1-最终修复-上传这些文件”文件夹本身上传成子目录。
 
-验证结果：
-- npm run check：通过
-- npm run test:wallet：通过
-- npm run test:image-recovery：通过
-- npm run test:agent-recovery：通过
+等待 Railway 最新部署显示 Success 后，关闭旧网站标签页，再重新打开网站。
+
+新版本识别方法：
+1. 生图任务耗时会持续增加，不会一直显示 0ms。
+2. 上传参考图时会显示“正在上传参考图”。
+3. 顶部不再提示“signal is aborted without reason”；云端慢时显示“已本地保存·云端待同步”。

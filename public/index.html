@@ -923,7 +923,45 @@
     }
   }
   let projectSaveChain=Promise.resolve();
-  async function persistProjectNow(){try{const data=serializeProject();data.id=activeProjectId;await dbWrite('project:'+activeProjectId,data);await dbWrite('current',data);let index=await dbRead('project-index')||[];const item={id:activeProjectId,name:data.name,updatedAt:Date.now(),nodes:data.nodes.length};index=[item,...index.filter(x=>x.id!==activeProjectId)].slice(0,40);await dbWrite('project-index',index);updateSaveMeta(cloudAuthState===true?'已云端保存':'已本地保存')}catch(error){updateSaveMeta('保存失败');note('画布保存失败：'+error.message)}}
+  let pendingCloudSaveBatch=null,cloudSaveRunning=false;
+  function queueCanvasCloudSave(entries){
+    if(cloudAuthState===false)return;
+    // Keep only the newest complete canvas snapshot. Dragging nodes can trigger many
+    // autosaves; uploading every intermediate snapshot creates a long request queue.
+    pendingCloudSaveBatch=entries;
+    if(cloudSaveRunning)return;
+    cloudSaveRunning=true;
+    (async()=>{
+      while(pendingCloudSaveBatch){
+        const batch=pendingCloudSaveBatch;pendingCloudSaveBatch=null;
+        try{
+          await Promise.all(batch.map(([key,value])=>cloudRequest('PUT',key,value)));
+          updateSaveMeta('已云端保存');
+        }catch(error){
+          console.warn('[canvas cloud save]',error?.message||error);
+          updateSaveMeta('已本地保存·云端待同步');
+          // A later edit/login/reconnect will enqueue the newest complete snapshot.
+        }
+      }
+    })().finally(()=>{cloudSaveRunning=false;if(pendingCloudSaveBatch)queueCanvasCloudSave(pendingCloudSaveBatch)});
+  }
+  async function persistProjectNow(){
+    try{
+      const data=serializeProject();data.id=activeProjectId;
+      const projectKey='project:'+activeProjectId;
+      await localDbWrite(projectKey,data);
+      await localDbWrite('current',data);
+      let index=await localDbRead('project-index')||[];
+      const item={id:activeProjectId,name:data.name,updatedAt:Date.now(),nodes:data.nodes.length};
+      index=[item,...index.filter(x=>x.id!==activeProjectId)].slice(0,40);
+      await localDbWrite('project-index',index);
+      updateSaveMeta(cloudAuthState===false?'已本地保存':'已本地保存·云端同步中');
+      queueCanvasCloudSave([[projectKey,data],['current',data],['project-index',index]]);
+    }catch(error){
+      updateSaveMeta('本地保存失败');
+      note('画布本地保存失败：'+(error?.message||'未知错误'));
+    }
+  }
   function saveProject(){projectSaveChain=projectSaveChain.catch(()=>{}).then(persistProjectNow);return projectSaveChain}
   async function loadSavedProject(){try{const saved=await dbRead('project:'+activeProjectId)||await dbRead('current');if(saved)restoreProject(saved);else updateSaveMeta()}catch(error){isRestoring=false;console.error('本地画布读取失败',error);updateSaveMeta('可继续使用');note('本地缓存恢复异常，已保留当前画布')}}
   function exportProject(){const data=serializeProject(),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(data.name||'xiaokai画布')+'.xiaokai.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);note('画布备份已导出')}
@@ -1263,6 +1301,7 @@ setNodeStatus=function(n,state='idle',text=''){
   badge.dataset.state=state;
   badge.querySelector('.text').textContent=text||({idle:'就绪',pending:'排队中',running:'运行中',done:'已完成',error:'失败',canceled:'已取消'}[state]||'就绪');
   n.dataset.runState=state;n.dataset.runStatusText=badge.querySelector('.text').textContent;
+  badge.title=badge.querySelector('.text').textContent;
 };
 
 function outgoingGenerationNodes(agentNode){
@@ -2053,6 +2092,7 @@ splitGrid=async function(n){
     if(task.durationMs)return task.durationMs;
     if(task.startedAt&&task.status==='running')return Date.now()-task.startedAt;
     if(task.startedAt&&task.finishedAt)return task.finishedAt-task.startedAt;
+    if(task.status==='running'&&task.createdAt)return Date.now()-task.createdAt;
     return 0;
   }
   function enrichTask(task,node){
@@ -2183,7 +2223,8 @@ splitGrid=async function(n){
       row.className='task-queue-item '+stateClass;
       row.innerHTML='<span class="task-dot"></span><div class="task-main"><b></b><small></small></div><div class="task-row-actions"><button class="task-rerun" title="使用相同参数重新运行">重跑</button><button class="task-cancel" title="取消任务">×</button></div>';
       row.querySelector('b').textContent=task.name;
-      const meta=[task.type==='agent'?'Agent':'生图',taskStatusLabel(task),task.model||'',task.sizeLabel||'',(task.durationMs||task.status==='running')?'耗时 '+formatDuration(liveDuration(task)):'',task.errorReason||((task.status==='error'||task.phase==='failed')?task.note:''),task.retryOf?'重试':'' ].filter(Boolean);
+      const runningNote=task.status==='running'&&task.note&&!['上传中','生成中'].includes(task.note)?task.note:'';
+      const meta=[task.type==='agent'?'Agent':'生图',taskStatusLabel(task),runningNote,task.model||'',task.sizeLabel||'',(task.durationMs||task.status==='running')?'耗时 '+formatDuration(liveDuration(task)):'',task.errorReason||((task.status==='error'||task.phase==='failed')?task.note:''),task.retryOf?'重试':'' ].filter(Boolean);
       row.querySelector('small').textContent=meta.join(' · ');
       const rerun=row.querySelector('.task-rerun');
       const cancel=row.querySelector('.task-cancel');
@@ -2194,6 +2235,13 @@ splitGrid=async function(n){
       taskQueueListEl.appendChild(row)
     })
   };
+  // Keep elapsed time moving even while a large reference image is still being
+  // uploaded and no provider task ID exists yet.
+  if(!window.__kaiTaskDurationTicker){
+    window.__kaiTaskDurationTicker=setInterval(()=>{
+      if(workflowQueue.some(task=>task.status==='running'))renderTaskQueue();
+    },500);
+  }
 
   function cloneNodeSizeAndPrompt(source,target){
     if(!source||!target)return;
@@ -2416,9 +2464,12 @@ splitGrid=async function(n){
       }
       const list=[...states.values()];
       const generating=list.filter(x=>x.state==='generating').length;
+      const uploading=list.filter(x=>x.state==='uploading'||x.state==='preparing').length;
       const waiting=list.filter(x=>x.state==='waiting'||x.state==='queuing').length;
-      task.phase=generating?'generating':'uploading';
-      task.note=generating?('生成中 '+generating+'/'+providerTasks.length):('排队中 '+waiting+'/'+providerTasks.length);
+      task.phase=uploading?'uploading':generating?'generating':'uploading';
+      task.note=uploading
+        ? ('正在上传参考图 '+uploading+'/'+providerTasks.length+'；完成后上游才会出现记录')
+        : generating?('上游生成中 '+generating+'/'+providerTasks.length):('上游排队中 '+waiting+'/'+providerTasks.length);
       const progressValues=list.map(x=>Number(x.progress||0)).filter(Number.isFinite);
       if(progressValues.length)task.progress=Math.round(progressValues.reduce((a,b)=>a+b,0)/progressValues.length);
       setNodeStatus(node,'running',task.phase==='generating'?'生成中':'上传中');
@@ -2439,7 +2490,7 @@ splitGrid=async function(n){
     node.__kaiLivePolling=true;
     const started=Date.now();
     task.startedAt=task.startedAt||started;
-    task.status='running';task.phase='uploading';task.note=task.model==='test-image'?'启动本地 Mock…':'连接图片服务…';
+    task.status='running';task.phase='uploading';task.note=task.model==='test-image'?'启动本地 Mock…':'正在上传参考图并提交；上传完成后上游才会出现记录';
     setNodeStatus(node,'running','上传中');renderTaskQueue();
     try{
       const {payload,resolved}=resolvedPromptFor(node,task);
@@ -2493,10 +2544,14 @@ splitGrid=async function(n){
       else if(delivery.confirmedCount)note('图片已确认加载成功，客户积分已正式扣除');
       else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
-      if(error?.name==='AbortError'||task.status==='canceled')return;
-      task.status='error';task.phase='failed';task.errorReason=error?.message||'生成失败';task.note=task.errorReason;
+      if(task.status==='canceled')return;
+      const timeoutReason=error?.name==='AbortError'
+        ? (task.providerTaskIds?.length?'等待上游任务响应超时，请稍后重试或使用“找回结果”':'提交图片任务超时，可能是参考图上传失败或图片服务未响应')
+        : '';
+      task.status='error';task.phase='failed';task.errorReason=timeoutReason||error?.message||'生成失败';task.note=task.errorReason;
       task.finishedAt=Date.now();task.durationMs=task.finishedAt-(task.startedAt||started);
-      setNodeStatus(node,'error','失败');
+      setNodeStatus(node,'error','失败·查看原因');
+      const badge=node.querySelector(':scope > .node-status');if(badge)badge.title=task.errorReason;
       note((task.model==='test-image'?'Mock：':task.provider==='otterl'?'OtterL：':'图片服务：')+task.errorReason);
     }finally{
       realAbortControllers.delete(task.id);
@@ -2518,6 +2573,10 @@ splitGrid=async function(n){
     return true;
   };
   processWorkflowQueue=async function(){
+    const activeTask=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
+    if(workflowActiveTask&&!activeTask)workflowActiveTask=null;
+    const activeGeneration=workflowQueue.some(task=>task.status==='running'&&task.type==='generation');
+    if(realQueueBusy&&!activeGeneration)realQueueBusy=false;
     if(realQueueBusy||workflowActiveTask)return;
     const next=workflowQueue.find(t=>t.status==='pending');
     if(!next)return;
@@ -2534,6 +2593,15 @@ splitGrid=async function(n){
       workflowActiveTask=null;realQueueBusy=false;renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,100)
     }
   };
+  // Recover automatically if an older build, refresh, or aborted request left only a
+  // stale runtime lock while visible tasks are still waiting.
+  if(!window.__kaiQueueWatchdog){
+    window.__kaiQueueWatchdog=setInterval(()=>{
+      const active=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
+      if(workflowActiveTask&&!active)workflowActiveTask=null;
+      if(workflowQueue.some(task=>task.status==='pending')&&!workflowActiveTask)processWorkflowQueue();
+    },1000);
+  }
 
   // 启动时检查后端是否在线；不会读取或暴露 Kie Key。
   requestAnimationFrame(()=>{

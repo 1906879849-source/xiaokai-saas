@@ -101,11 +101,17 @@ function fileExtension(contentType = '') {
   return 'png';
 }
 
-async function imageToBlob(source) {
+async function imageToBlob(source, task = null) {
   const value = String(source || '').trim();
   if (/^data:image\//i.test(value)) return dataUrlToBlob(value);
   if (!/^https?:\/\//i.test(value)) throw new Error('参考图地址无效');
-  const response = await fetch(value);
+  const headers = {};
+  try {
+    if (task?.referenceCookie && task?.referenceHost && new URL(value).host === task.referenceHost) {
+      headers.Cookie = task.referenceCookie;
+    }
+  } catch {}
+  const response = await fetch(value, { headers });
   if (!response.ok) throw new Error(`读取参考图失败：HTTP ${response.status}`);
   return new Blob([await response.arrayBuffer()], {
     type: response.headers.get('content-type') || 'image/png',
@@ -210,7 +216,7 @@ function extractGeminiResultUrls(json) {
 async function geminiRequestBody(task) {
   const parts = [{ text: task.prompt }];
   for (const source of task.imageUrls) {
-    const blob = await imageToBlob(source);
+    const blob = await imageToBlob(source, task);
     parts.push({
       inlineData: {
         mimeType: blob.type || 'image/png',
@@ -508,7 +514,7 @@ function assertRequestedAspectRatio(task, dimensions = null) {
 }
 
 async function runTask(task) {
-  task.state = 'generating';
+  task.state = 'uploading';
   task.progress = 8;
   persistTask(task);
   try {
@@ -524,23 +530,32 @@ async function runTask(task) {
     let urls;
     if (GEMINI_IMAGE_MODELS.has(task.modelName)) {
       task.progress = 18;
-      json = await otterGeminiFetch(task.model, await geminiRequestBody(task));
+      const requestBody = await geminiRequestBody(task);
+      task.state = 'generating';
+      task.progress = 22;
+      persistTask(task);
+      json = await otterGeminiFetch(task.model, requestBody);
       urls = extractGeminiResultUrls(json);
     } else if (task.imageUrls.length) {
       const form = new FormData();
       Object.entries(common).forEach(([key, value]) => form.append(key, String(value)));
       for (let index = 0; index < task.imageUrls.length; index += 1) {
-        const blob = await imageToBlob(task.imageUrls[index]);
+        const blob = await imageToBlob(task.imageUrls[index], task);
         const ext = fileExtension(blob.type);
         form.append('image[]', blob, `reference-${index + 1}.${ext}`);
       }
       if (task.maskUrl) {
-        const maskBlob = await imageToBlob(task.maskUrl);
+        const maskBlob = await imageToBlob(task.maskUrl, task);
         form.append('mask', maskBlob, `mask.${fileExtension(maskBlob.type)}`);
       }
-      task.progress = 18;
+      task.state = 'generating';
+      task.progress = 22;
+      persistTask(task);
       json = await otterFetch('/images/edits', { method: 'POST', body: form });
     } else {
+      task.state = 'generating';
+      task.progress = 22;
+      persistTask(task);
       json = await otterFetch('/images/generations', {
         method: 'POST',
         body: JSON.stringify(common),
@@ -583,7 +598,7 @@ async function runTask(task) {
   }
 }
 
-async function createImageTask({ modelName, prompt, aspectRatio, resolution, imageUrls = [], maskUrl = '', background = '', operation = '' }) {
+async function createImageTask({ modelName, prompt, aspectRatio, resolution, imageUrls = [], referenceHost = '', referenceCookie = '', maskUrl = '', background = '', operation = '' }) {
   const runtimeModel = platformSettings.resolveModel(modelName);
   const requestedResolution = runtimeModel?.fixedResolution || (FIXED_4K_MODELS.has(modelName) ? '4K' : normalizeResolution(resolution));
   const supportedResolutions = runtimeModel?.resolutions || MODEL_RESOLUTIONS[modelName] || ['1K'];
@@ -604,6 +619,10 @@ async function createImageTask({ modelName, prompt, aspectRatio, resolution, ima
     aspectRatio: normalizeAspectRatio(aspectRatio),
     resolution: normalizedResolution,
     imageUrls: Array.isArray(imageUrls) ? imageUrls.slice(0, 10) : [],
+    // Used only in memory while downloading this account's own protected reference
+    // images. publicTask() deliberately never persists or returns the session cookie.
+    referenceHost: String(referenceHost || ''),
+    referenceCookie: String(referenceCookie || ''),
     maskUrl: String(maskUrl || ''),
     background: normalizeBackground(background),
     operation: String(operation || ''),
