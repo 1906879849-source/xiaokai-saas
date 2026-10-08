@@ -29,6 +29,14 @@
   let wallet = { balance: 0, reserved: 0, available: 0 };
   let quote = null;
   let currentUser = null;
+  let announcedUserId = '';
+
+  function announceAuth(user) {
+    const nextId = String(user?.id || '');
+    if (nextId === announcedUserId) return;
+    announcedUserId = nextId;
+    document.dispatchEvent(new CustomEvent('kai:auth-changed', { detail: { user: user || null } }));
+  }
 
   // Keep the price visible before login as well. The server remains the source
   // of truth for billing; this is only a display fallback for the public canvas.
@@ -110,12 +118,12 @@
 
   async function loadAccount() {
     try {
-      const data = await json('/api/auth/me'); currentUser = data.user; apply(data.wallet);
+      const data = await json('/api/auth/me'); currentUser = data.user; apply(data.wallet);announceAuth(currentUser);
       document.getElementById('walletUser').textContent = `${currentUser.displayName || currentUser.username} · ${currentUser.username}`;
       document.getElementById('walletAdmin').hidden = currentUser.role !== 'admin';
       return true;
     } catch {
-      currentUser = null; wallet = { balance: 0, reserved: 0, available: 0 }; apply(wallet); refreshQuote(); return false;
+      currentUser = null; wallet = { balance: 0, reserved: 0, available: 0 }; apply(wallet);announceAuth(null);refreshQuote(); return false;
     }
   }
 
@@ -240,10 +248,10 @@
   document.getElementById('authForm').onsubmit = async event => {
     event.preventDefault();
     const payload={username:document.getElementById('authUsername').value,password:document.getElementById('authPassword').value,displayName:document.getElementById('authDisplay').value};
-    try { const data=await json(`/api/auth/${authMode}`,{method:'POST',body:JSON.stringify(payload)});currentUser=data.user;apply(data.wallet);authModal.classList.remove('open');await open(); }
+    try { const data=await json(`/api/auth/${authMode}`,{method:'POST',body:JSON.stringify(payload)});currentUser=data.user;apply(data.wallet);announceAuth(currentUser);authModal.classList.remove('open');await open(); }
     catch(error){ alert(error.message); }
   };
-  document.getElementById('walletLogout').onclick = async () => { try{await json('/api/auth/logout',{method:'POST'})}catch{} currentUser=null;modal.classList.remove('open');apply({balance:0,reserved:0,available:0});showAuth('login'); };
+  document.getElementById('walletLogout').onclick = async () => { try{await json('/api/auth/logout',{method:'POST'})}catch{} currentUser=null;announceAuth(null);modal.classList.remove('open');apply({balance:0,reserved:0,available:0});showAuth('login'); };
   document.querySelectorAll('[data-recharge-amount]').forEach(button => button.onclick = () => {
     document.querySelectorAll('[data-recharge-amount]').forEach(item => item.classList.toggle('on', item === button));
     document.getElementById('rechargeAmount').value = button.dataset.rechargeAmount;

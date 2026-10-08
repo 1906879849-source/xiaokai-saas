@@ -15,6 +15,7 @@ const accounts = require('./src/accounts');
 const workflows = require('./src/workflows');
 const announcements = require('./src/announcements');
 const platformSettings = require('./src/platform-settings');
+const canvasCloud = require('./src/canvas-cloud');
 const { generatedDir } = require('./src/storage-paths');
 
 const app = express();
@@ -25,7 +26,7 @@ const GENERATED_DIR = generatedDir();
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
 app.disable('x-powered-by');
-app.use(express.json({ limit: '25mb' }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '70mb' }));
 
 // 方便你暂时仍用 4180 打开旧页面；正式上线建议只允许自己的域名。
 app.use((req, res, next) => {
@@ -242,6 +243,27 @@ app.get('/api/recharges', (req, res) => {
 
 app.get('/api/announcements', (req, res) => {
   res.json({ ok: true, announcements: announcements.list({ activeOnly: true }) });
+});
+
+app.get('/api/canvas-cloud', (req, res) => {
+  try {
+    const record = canvasCloud.read(req.user.id, req.query.key);
+    if (!record) return res.status(404).json({ ok: false, error: '云端数据不存在' });
+    res.json({ ok: true, key: record.key, updatedAt: record.updatedAt, value: record.value });
+  } catch (error) { safeJsonError(res, error); }
+});
+
+app.put('/api/canvas-cloud', (req, res) => {
+  try {
+    const saved = canvasCloud.write(req.user.id, req.body?.key, req.body?.value);
+    res.json({ ok: true, ...saved });
+  } catch (error) { safeJsonError(res, error); }
+});
+
+app.delete('/api/canvas-cloud', (req, res) => {
+  try {
+    res.json({ ok: true, removed: canvasCloud.remove(req.user.id, req.query.key) });
+  } catch (error) { safeJsonError(res, error); }
 });
 
 function requireAdmin(req, res, next) {

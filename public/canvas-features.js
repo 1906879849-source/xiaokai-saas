@@ -183,7 +183,11 @@
     return priorQueueNodeExecution(node,options)
   };
 
-  // Keep obsolete ZIP entries and old video nodes out of the visible product surface.
+  // Remove obsolete, non-functional video placeholders from older saved projects.
   document.querySelectorAll('.agent-skill-file,#skillFile').forEach(input=>input.accept='.md');
-  document.querySelectorAll('.video-node,.node').forEach(node=>{if(node.classList.contains('video-node')||node.querySelector('.video-art'))node.hidden=true});
+  document.querySelectorAll('.video-node,.node').forEach(node=>{
+    if(!node.classList.contains('video-node')&&!node.querySelector('.video-art'))return;
+    document.querySelectorAll(`.wire path[data-a="${node.id}"],.wire path[data-b="${node.id}"]`).forEach(path=>path.remove());
+    node.remove();
+  });
 })();

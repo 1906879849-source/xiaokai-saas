@@ -15,6 +15,8 @@ try {
   const held = wallet.reserve('request-1', price);
   assert.equal(wallet.publicWallet().available, 60);
   wallet.attachTasks(held.reservation.id, ['task-a', 'task-b']);
+  assert.equal(wallet.hasTask('task-a'), true);
+  assert.equal(wallet.runAs('different-user', () => wallet.hasTask('task-a')), false);
   wallet.settleTask('task-a', true);
   assert.deepEqual(wallet.publicWallet(), { balance: 80, reserved: 20, available: 60 });
   wallet.settleTask('task-b', false);

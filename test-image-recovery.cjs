@@ -15,17 +15,23 @@ testPngBuffer.writeUInt32BE(1024, 20);
 const oneKTestPng = testPngBuffer.toString('base64');
 const twoKTestPngBuffer = Buffer.from(testPngBuffer);
 twoKTestPngBuffer.writeUInt32BE(2048, 16);
-twoKTestPngBuffer.writeUInt32BE(2048, 20);
+twoKTestPngBuffer.writeUInt32BE(1152, 20);
 const twoKTestPng = twoKTestPngBuffer.toString('base64');
 let geminiPayload = null;
 let relativeResultAuthorized = false;
 let openAiGenerationCount = 0;
+let openAiGenerationPayload = null;
 
 const fake = http.createServer((req, res) => {
   if (req.url === '/v1/images/generations') {
-    openAiGenerationCount += 1;
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ data: [{ url: openAiGenerationCount === 1 ? '/files/result.png' : '/files/temporary.png' }], usage: { total_tokens: 17 } }));
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      openAiGenerationCount += 1;
+      openAiGenerationPayload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: [{ url: openAiGenerationCount === 1 ? '/files/result.png' : '/files/temporary.png' }], usage: { total_tokens: 17 } }));
+    });
     return;
   }
   if (req.url === '/files/result.png') {
@@ -60,6 +66,16 @@ async function waitForSuccess(provider, taskId) {
   throw new Error('测试任务等待超时');
 }
 
+async function waitForLocalResult(provider, taskId) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const task = await provider.getTask(taskId);
+    if (task.state === 'fail') throw new Error(task.failMsg || task.failCode);
+    if (task.state === 'success' && /^\/generated\//.test(task.resultUrls?.[0] || '')) return task;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error('本地图片缓存测试超时');
+}
+
 fake.listen(0, '127.0.0.1', async () => {
   try {
     process.env.OTTERL_BASE_URL = `http://127.0.0.1:${fake.address().port}/v1`;
@@ -71,7 +87,13 @@ fake.listen(0, '127.0.0.1', async () => {
       aspectRatio: '1:1',
       resolution: 'standard',
     });
-    const completed = await waitForSuccess(provider, created.taskId);
+    const immediate = await waitForSuccess(provider, created.taskId);
+    assert.strictEqual(immediate.state, 'success');
+    assert.match(immediate.resultUrls[0], /\/files\/result\.png$/);
+    assert.strictEqual(immediate.billingEligible, true);
+    assert.strictEqual(openAiGenerationPayload.aspect_ratio, '1:1');
+    assert.strictEqual(openAiGenerationPayload.size, undefined);
+    const completed = await waitForLocalResult(provider, created.taskId);
     assert.strictEqual(completed.state, 'success');
     assert.match(completed.resultUrls[0], /^\/generated\//);
     assert.strictEqual(relativeResultAuthorized, true);
@@ -90,9 +112,10 @@ fake.listen(0, '127.0.0.1', async () => {
       aspectRatio: '16:9',
       resolution: '2K',
     });
-    const geminiCompleted = await waitForSuccess(restartedProvider, geminiCreated.taskId);
+    const geminiCompleted = await waitForLocalResult(restartedProvider, geminiCreated.taskId);
     assert.strictEqual(geminiCompleted.state, 'success');
     assert.strictEqual(geminiCompleted.outputWidth, 2048);
+    assert.strictEqual(geminiCompleted.outputHeight, 1152);
     assert.strictEqual(geminiPayload.generationConfig.imageConfig.imageSize, '2K');
     assert.strictEqual(geminiPayload.generationConfig.imageConfig.aspectRatio, '16:9');
     const temporaryCreated = await restartedProvider.createImageTask({
