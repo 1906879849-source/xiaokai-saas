@@ -388,6 +388,13 @@
     .task-empty { padding:14px 8px; color:#8f96a1; text-align:center; font-size:12px; }
     .agent-result { margin-top:12px; padding:10px 11px; border:1px solid #30343a; border-radius:10px; background:#14161a; color:#dfe3ea; font-size:12px; line-height:1.6; white-space:pre-wrap; }
     .agent-result.error { border-color:rgba(255,97,97,.48); background:rgba(55,17,17,.72); color:#ffb0b0; }
+    .generation-error { position:absolute; inset:0; z-index:7; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:44px 22px 22px; border-radius:inherit; background:linear-gradient(180deg,rgba(31,22,24,.97),rgba(22,22,25,.98)); color:#eceff4; text-align:center; }
+    .generation-error-icon { width:28px; height:28px; display:grid; place-items:center; border:1px solid rgba(255,107,107,.45); border-radius:50%; background:rgba(255,83,83,.10); color:#ff8585; font-size:16px; font-weight:800; }
+    .generation-error b { color:#fff; font-size:13px; }
+    .generation-error-stage { color:#ff9b9b; font-size:11px; }
+    .generation-error-reason { max-width:100%; display:-webkit-box; overflow:hidden; -webkit-box-orient:vertical; -webkit-line-clamp:4; color:#aeb4be; font-size:11px; line-height:1.55; word-break:break-word; }
+    .generation-error button { height:29px; margin-top:3px; padding:0 13px; border:1px solid rgba(255,255,255,.13); border-radius:8px; background:#f2f3f5; color:#17181b; font-size:11px; font-weight:700; cursor:pointer; }
+    .generation-error button:hover { background:#fff; }
 
 
     /* workflow queue + stronger run states */
@@ -2342,6 +2349,47 @@ splitGrid=async function(n){
       return data;
     }finally{clearTimeout(timer)}
   }
+  function generationFailureStage(task,message='',phase=''){
+    const text=String(message||'').toLowerCase();
+    if(/policy|moderation|safety|content.?filter|违规|敏感|审核|平台规则/.test(text))return '内容审核未通过';
+    if(/ratio|pixel|dimension|尺寸|比例|规格/.test(text))return '结果规格校验失败';
+    if(/reference|upload|fetch|image.*load|参考图|上传|读取图片/.test(text))return '参考图上传失败';
+    if(/余额|积分|冻结|扣除|wallet|credit/.test(text))return '积分校验失败';
+    if(phase==='uploading'||!task?.providerTaskIds?.length)return '提交任务失败';
+    if(/timeout|timed out|超时/.test(text))return '等待上游结果超时';
+    return '上游生成失败';
+  }
+  function clearGenerationFailure(node){
+    if(!node)return;
+    node.querySelector(':scope > .card > .generation-error')?.remove();
+    delete node.dataset.generationLastError;
+    delete node.dataset.generationLastErrorStage;
+  }
+  function showGenerationFailure(node,task,message,phase=''){
+    const card=node?.querySelector(':scope > .card');if(!card)return;
+    clearGenerationFailure(node);
+    const reason=String(message||'图片生成失败，请稍后重试');
+    const stage=generationFailureStage(task,reason,phase);
+    const panel=document.createElement('div');panel.className='generation-error';
+    const icon=document.createElement('div');icon.className='generation-error-icon';icon.textContent='!';
+    const title=document.createElement('b');title.textContent='生成失败';
+    const stageEl=document.createElement('div');stageEl.className='generation-error-stage';stageEl.textContent='问题位置：'+stage;
+    const reasonEl=document.createElement('div');reasonEl.className='generation-error-reason';reasonEl.textContent=reason;reasonEl.title=reason;
+    const retry=document.createElement('button');retry.type='button';retry.dataset.generationErrorRetry='1';retry.textContent='按原参数重新生成';
+    panel.append(icon,title,stageEl,reasonEl,retry);card.appendChild(panel);
+    node.dataset.generationLastError=reason;node.dataset.generationLastErrorStage=stage;
+  }
+  if(!window.__kaiGenerationErrorRetryBound){
+    window.__kaiGenerationErrorRetryBound=true;
+    document.addEventListener('click',event=>{
+      const button=event.target.closest?.('[data-generation-error-retry]');if(!button)return;
+      event.preventDefault();event.stopPropagation();
+      const node=button.closest('.generation-node');if(!node)return;
+      selectNode(node,false,true);loadPromptFromNode(node);
+      const snap=snapshotRunParams(node);clearGenerationFailure(node);
+      queueNodeExecution(node,{retryOf:'node-error',lockedModel:snap.model,lockedSizeState:snap.sizeState,lockedPromptText:snap.promptText,lockedPromptHtml:snap.promptHtml});
+    });
+  }
   function parseState(raw){if(!raw)return{};try{return typeof raw==='string'?JSON.parse(raw):raw}catch{return{}}}
   function optionText(selector,index,fallback=''){
     const buttons=[...document.querySelectorAll(selector+' button')];
@@ -2491,6 +2539,7 @@ splitGrid=async function(n){
     const started=Date.now();
     task.startedAt=task.startedAt||started;
     task.status='running';task.phase='uploading';task.note=task.model==='test-image'?'启动本地 Mock…':'正在上传参考图并提交；上传完成后上游才会出现记录';
+    clearGenerationFailure(node);
     setNodeStatus(node,'running','上传中');renderTaskQueue();
     try{
       const {payload,resolved}=resolvedPromptFor(node,task);
@@ -2545,11 +2594,13 @@ splitGrid=async function(n){
       else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
       if(task.status==='canceled')return;
+      const failedPhase=task.phase;
       const timeoutReason=error?.name==='AbortError'
         ? (task.providerTaskIds?.length?'等待上游任务响应超时，请稍后重试或使用“找回结果”':'提交图片任务超时，可能是参考图上传失败或图片服务未响应')
         : '';
       task.status='error';task.phase='failed';task.errorReason=timeoutReason||error?.message||'生成失败';task.note=task.errorReason;
       task.finishedAt=Date.now();task.durationMs=task.finishedAt-(task.startedAt||started);
+      showGenerationFailure(node,task,task.errorReason,failedPhase);
       setNodeStatus(node,'error','失败·查看原因');
       const badge=node.querySelector(':scope > .node-status');if(badge)badge.title=task.errorReason;
       note((task.model==='test-image'?'Mock：':task.provider==='otterl'?'OtterL：':'图片服务：')+task.errorReason);
@@ -2586,6 +2637,7 @@ splitGrid=async function(n){
     if(next.type!=='generation')return _legacyProcessWorkflowQueueV1();
     if(!isRealModel(next.model)){
       next.status='error';next.phase='failed';next.note='当前模型没有可用的图片接口';next.errorReason=next.note;next.finishedAt=Date.now();
+      showGenerationFailure(node,next,next.errorReason,'uploading');
       setNodeStatus(node,'error','模型未接入');renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,50);return;
     }
     realQueueBusy=true;workflowActiveTask=next.id;
@@ -2610,7 +2662,7 @@ splitGrid=async function(n){
     }).catch(()=>{});
   });
   // Expose the two task helpers while they are still inside their defining scope.
-  window.KAI_IMAGE_RUNTIME={pollProviderTasks,applyRealResults,confirmTemporaryDeliveries};
+  window.KAI_IMAGE_RUNTIME={pollProviderTasks,applyRealResults,confirmTemporaryDeliveries,showGenerationFailure,clearGenerationFailure};
 })();
 
 
@@ -2890,6 +2942,7 @@ splitGrid=async function(n){
       if(error?.name!=='AbortError'){
         node.dataset.providerRecoveryState='error';
         node.__kaiRecoveryFailedAt=Date.now();
+        window.KAI_IMAGE_RUNTIME?.showGenerationFailure?.(node,task,error?.message||'结果恢复失败','generating');
         setNodeStatus(node,'error','恢复失败');
         if(!quiet)note('结果恢复失败：'+(error?.message||'未知错误'));
         console.warn('图片结果恢复失败',error);
