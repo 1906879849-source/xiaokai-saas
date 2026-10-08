@@ -553,6 +553,8 @@ app.post('/api/image/generate', async (req, res) => {
           aspectRatio: body.aspectRatio,
           resolution: requestedResolution,
           imageUrls,
+          referenceHost: String(req.get('host') || ''),
+          referenceCookie: String(req.get('cookie') || ''),
           maskUrl: mask,
           background: body.background,
           operation: body.operation,
