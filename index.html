@@ -2390,6 +2390,23 @@ splitGrid=async function(n){
       queueNodeExecution(node,{retryOf:'node-error',lockedModel:snap.model,lockedSizeState:snap.sizeState,lockedPromptText:snap.promptText,lockedPromptHtml:snap.promptHtml});
     });
   }
+  // A cloud-canvas refresh can replace node HTML immediately after a failure.
+  // Rebuild the in-node error card from the authoritative task record whenever
+  // the queue is rendered, so the reason cannot disappear while the red badge
+  // remains visible.
+  const renderTaskQueueWithFailurePanels=renderTaskQueue;
+  renderTaskQueue=function(){
+    renderTaskQueueWithFailurePanels();
+    queueMicrotask(()=>{
+      workflowQueue.filter(task=>task.status==='error'&&task.type==='generation').forEach(task=>{
+        const node=document.getElementById(task.nodeId);if(!node)return;
+        showGenerationFailure(node,task,task.errorReason||task.note||'图片生成失败',task.failedPhase||'generating');
+      });
+      document.querySelectorAll('.generation-node[data-run-state="error"][data-generation-last-error]').forEach(node=>{
+        if(!node.querySelector(':scope > .card > .generation-error'))showGenerationFailure(node,null,node.dataset.generationLastError,node.dataset.generationLastErrorStage||'');
+      });
+    });
+  };
   function parseState(raw){if(!raw)return{};try{return typeof raw==='string'?JSON.parse(raw):raw}catch{return{}}}
   function optionText(selector,index,fallback=''){
     const buttons=[...document.querySelectorAll(selector+' button')];
@@ -2617,7 +2634,7 @@ splitGrid=async function(n){
       const timeoutReason=error?.name==='AbortError'
         ? (task.providerTaskIds?.length?'等待上游任务响应超时，请稍后重试或使用“找回结果”':'提交图片任务超时，可能是参考图上传失败或图片服务未响应')
         : '';
-      task.status='error';task.phase='failed';task.errorReason=timeoutReason||error?.message||'生成失败';task.note=task.errorReason;
+      task.status='error';task.phase='failed';task.failedPhase=failedPhase;task.errorReason=timeoutReason||error?.message||'生成失败';task.note=task.errorReason;
       task.finishedAt=Date.now();task.durationMs=task.finishedAt-(task.startedAt||started);
       showGenerationFailure(node,task,task.errorReason,failedPhase);
       setNodeStatus(node,'error','失败·查看原因');
