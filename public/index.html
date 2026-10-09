@@ -1077,11 +1077,11 @@
   document.querySelectorAll('[data-edge-action]').forEach(b=>b.onclick=()=>{const action=b.dataset.edgeAction,path=selectedEdge;if(!path)return;if(action==='delete')return deleteEdge(path);if(action==='earlier'||action==='later'){const svg=document.querySelector('.wire'),before=[...svg.querySelectorAll('path[data-a][data-b]')],same=before.filter(p=>p.dataset.b===path.dataset.b),i=same.indexOf(path),swap=action==='earlier'?same[i-1]:same[i+1];if(!swap)return note('已经位于当前顺序边界');if(action==='earlier')svg.insertBefore(path,swap);else svg.insertBefore(swap,path);const after=[...svg.querySelectorAll('path[data-a][data-b]')],applyOrder=list=>{list.forEach(p=>svg.appendChild(p));wires()};commitHistory({undo:()=>applyOrder(before),redo:()=>applyOrder(after)});wires();scheduleSave();document.getElementById('edgeMenu').classList.remove('open');note('输入顺序已调整');return}const a=document.getElementById(path.dataset.a),z=document.getElementById(path.dataset.b);if(!a||!z)return;const svg=document.querySelector('.wire'),oldNext=path.nextSibling,text=createTextNode('text',(a.offsetLeft+z.offsetLeft)/2,(a.offsetTop+z.offsetTop)/2,'',false),created=[];path.remove();[[a,text],[text,z]].forEach(([from,to])=>{const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.dataset.a=from.id;p.dataset.b=to.id;svg.appendChild(p);bindEdge(p);created.push(p)});commitHistory({undo:()=>{created.forEach(p=>p.remove());text.remove();svg.insertBefore(path,oldNext);bindEdge(path);wires()},redo:()=>{path.remove();world.appendChild(text);created.forEach(p=>{svg.appendChild(p);bindEdge(p)});wires()}});selectedEdge=null;document.getElementById('edgeMenu').classList.remove('open');wires();note('已在连线上插入文字节点')});
   document.getElementById('modelSelect').onclick=e=>{e.stopPropagation();document.getElementById('modelMenu').classList.toggle('open')};
   const MODEL_RESOLUTION_OPTIONS={
-    'GPT Image 2':['1K'],
+    'GPT Image 2':['1K','2K'],
     'GPT Image 2 · 4K 超分':['4K'],
     'GPT Image 2 · 原生 4K':['4K'],
-    'GPT Image 2.5 Flare':['1K'],
-    'GPT Image 2.5 Sunburst':['1K'],
+    'GPT Image 2.5 Flare':['1K','2K'],
+    'GPT Image 2.5 Sunburst':['1K','2K'],
     'Gemini 3 Pro Image':['1K','2K','4K'],
     'Gemini 3.1 Flash Image':['1K','2K','4K']
   };

@@ -41,11 +41,11 @@
   // Keep the price visible before login as well. The server remains the source
   // of truth for billing; this is only a display fallback for the public canvas.
   const LOCAL_IMAGE_PRICES = {
-    'GPT Image 2': { standard: 24, high: 24, default: 24 },
+    'GPT Image 2': { '1K': 4, '2K': 5, standard: 4, high: 5, default: 4 },
     'GPT Image 2 · 4K 超分': { default: 24 },
     'GPT Image 2 · 原生 4K': { default: 40 },
-    'GPT Image 2.5 Flare': { standard: 24, high: 24, default: 24 },
-    'GPT Image 2.5 Sunburst': { standard: 24, high: 24, default: 24 },
+    'GPT Image 2.5 Flare': { '1K': 7, '2K': 8, standard: 7, high: 8, default: 7 },
+    'GPT Image 2.5 Sunburst': { '1K': 7, '2K': 8, standard: 7, high: 8, default: 7 },
     'Gemini 3 Pro Image': { default: 80 },
     'Gemini 3.1 Flash Image': { default: 60 },
   };
