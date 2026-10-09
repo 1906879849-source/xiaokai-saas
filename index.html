@@ -2490,6 +2490,28 @@ splitGrid=async function(n){
       image.src=url;
     });
   }
+  function loadedCanvasImage(source){
+    let absolute=String(source||'');
+    try{absolute=new URL(absolute,location.href).href}catch{}
+    return [...document.querySelectorAll('.uploaded-image')].find(image=>image.complete&&image.naturalWidth>0&&image.src===absolute)||null;
+  }
+  async function materializeGenerationReference(source,index){
+    const value=String(source||'').trim();if(!value)return'';
+    // Send the pixels already visible in the browser instead of asking Railway to
+    // call its own protected image endpoint. This avoids self-proxy 502s and also
+    // reduces large 4K references before the generation request is submitted.
+    try{
+      let image=loadedCanvasImage(value);
+      if(!image){image=new Image();image.src=value;await image.decode()}
+      const maxSide=2048,scale=Math.min(1,maxSide/Math.max(image.naturalWidth,image.naturalHeight));
+      const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
+      const context=canvas.getContext('2d');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
+      return canvas.toDataURL('image/jpeg',.9);
+    }catch(error){
+      console.warn('第 '+(index+1)+' 张参考图浏览器直传准备失败，改用原地址',error);
+      return value;
+    }
+  }
   async function confirmTemporaryDeliveries(providerTasks,successes){
     const temporary=successes.filter(item=>Array.isArray(item.urls)&&item.urls.some(Boolean));
     const warnings=[];
@@ -2574,6 +2596,8 @@ splitGrid=async function(n){
       const {payload,resolved}=resolvedPromptFor(node,task);
       if(!resolved.trim())throw new Error('请输入生图 Prompt');
       const params=taskParams(task,node);
+      task.note=payload.images.length?'正在整理并压缩参考图':'正在提交生图任务';renderTaskQueue();
+      const submittedImages=await Promise.all(payload.images.map((item,index)=>materializeGenerationReference(item.value,index)));
       task.resolvedPrompt=resolved;
       task.billingRequestId=task.billingRequestId||(globalThis.crypto?.randomUUID?.()||('bill-'+Date.now()+'-'+Math.random().toString(16).slice(2)));
       const created=await apiFetch('/api/image/generate',{
@@ -2585,7 +2609,7 @@ splitGrid=async function(n){
           background:params.background,
           operation:node.dataset.imageOperation||'',
           mask:node.dataset.editMask||'',
-          images:payload.images.map(x=>x.value).filter(Boolean)
+          images:submittedImages.filter(Boolean)
         }
       });
       window.KAI_WALLET?.apply(created.wallet);
