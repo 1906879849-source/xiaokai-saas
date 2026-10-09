@@ -395,6 +395,23 @@ function hasTask(taskId) {
   return Boolean(store.tasks[String(taskId || '')]);
 }
 
+function normalizedGeneratedPath(value) {
+  try {
+    const pathname = /^https?:\/\//i.test(String(value || '')) ? new URL(String(value)).pathname : String(value || '').split(/[?#]/)[0];
+    if (!pathname.startsWith('/generated/')) return '';
+    const fileName = decodeURIComponent(pathname.slice('/generated/'.length));
+    return fileName && path.basename(fileName) === fileName ? `/generated/${fileName}` : '';
+  } catch { return ''; }
+}
+
+function ownsResultUrl(url) {
+  const wanted = normalizedGeneratedPath(url);
+  if (!wanted) return false;
+  return Object.values(store.tasks).some(task =>
+    Array.isArray(task.resultUrls) && task.resultUrls.some(item => normalizedGeneratedPath(item) === wanted)
+  );
+}
+
 function taskByRequest(requestId) {
   const reservationId = store.requests[String(requestId || '')];
   if (!reservationId) return null;
@@ -428,6 +445,6 @@ function pointValueRmb() { return POINT_VALUE_RMB; }
 
 module.exports = {
   publicWallet, quote, reserve, attachTasks, releaseUnattached,
-  settleTask, settleVariableTask, recentLedger, pendingTasks, recentTasks, hasTask, pricing, pointValueRmb, grant,
+  settleTask, settleVariableTask, recentLedger, pendingTasks, recentTasks, hasTask, ownsResultUrl, pricing, pointValueRmb, grant,
   taskByRequest, recentAgentResults, releaseExpiredTasks, runAs, listUserIds,
 };

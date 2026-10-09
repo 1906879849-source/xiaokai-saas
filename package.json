@@ -13,7 +13,8 @@
     "test:frontend": "node test-frontend-syntax.cjs",
     "test:agent-recovery": "node test-agent-recovery.cjs",
     "test:image-recovery": "node test-image-recovery.cjs",
-    "test:canvas-cloud": "node test-canvas-cloud.cjs && node test-canvas-cloud-api.cjs"
+    "test:canvas-cloud": "node test-canvas-cloud.cjs && node test-canvas-cloud-api.cjs",
+    "test:security": "node test-security-api.cjs"
   },
   "engines": {
     "node": ">=18"

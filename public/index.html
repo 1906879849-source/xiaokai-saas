@@ -2088,11 +2088,13 @@ splitGrid=async function(n){
   }
   function taskStatusLabel(task){
     if(!task)return '未知';
+    if(task.cancelPending)return '正在停止等待';
     if(task.status==='pending')return '等待';
     if(task.status==='running')return task.phase==='uploading'?'上传中':'生成中';
     if(task.status==='done')return task.phase==='warning'?'成功·规格提示':'成功';
     if(task.status==='error')return '失败';
     if(task.status==='canceled')return '已取消';
+    if(task.status==='detached')return '后台生成中';
     return task.status||'未知';
   }
   function liveDuration(task){
@@ -2230,17 +2232,27 @@ splitGrid=async function(n){
       row.className='task-queue-item '+stateClass;
       row.innerHTML='<span class="task-dot"></span><div class="task-main"><b></b><small></small></div><div class="task-row-actions"><button class="task-rerun" title="使用相同参数重新运行">重跑</button><button class="task-cancel" title="取消任务">×</button></div>';
       row.querySelector('b').textContent=task.name;
-      const runningNote=task.status==='running'&&task.note&&!['上传中','生成中'].includes(task.note)?task.note:'';
+      const runningNote=(task.status==='running'||task.status==='detached')&&task.note&&!['上传中','生成中'].includes(task.note)?task.note:'';
       const meta=[task.type==='agent'?'Agent':'生图',taskStatusLabel(task),runningNote,task.model||'',task.sizeLabel||'',(task.durationMs||task.status==='running')?'耗时 '+formatDuration(liveDuration(task)):'',task.errorReason||((task.status==='error'||task.phase==='failed')?task.note:''),task.retryOf?'重试':'' ].filter(Boolean);
       row.querySelector('small').textContent=meta.join(' · ');
       const rerun=row.querySelector('.task-rerun');
       const cancel=row.querySelector('.task-cancel');
       rerun.hidden=!['done','error','canceled'].includes(task.status);
-      cancel.hidden=!['pending','running'].includes(task.status);
+      cancel.hidden=!['pending','running'].includes(task.status)||Boolean(task.cancelPending);
+      const submitted=Boolean(task.providerTaskIds?.length||task.submissionStartedAt||task.billingRequestId);
+      cancel.title=submitted?'停止本地等待；已提交的任务会在后台继续并计费':'取消尚未提交的任务';
       rerun.onclick=e=>{e.stopPropagation();rerunWorkflowTask(task)};
       cancel.onclick=e=>{e.stopPropagation();cancelWorkflowTask(task.id)};
       taskQueueListEl.appendChild(row)
-    })
+    });
+    const cancelActive=document.getElementById('cancelActiveTask');
+    if(cancelActive){
+      const active=workflowQueue.find(task=>task.status==='running');
+      const submitted=Boolean(active&&(active.providerTaskIds?.length||active.submissionStartedAt||active.billingRequestId));
+      cancelActive.textContent=submitted?'停止等待':'取消任务';
+      cancelActive.title=submitted?'只停止本地等待，已提交上游的任务仍会继续并计费':'取消当前尚未提交的任务';
+      cancelActive.disabled=Boolean(active?.cancelPending);
+    }
   };
   // Keep elapsed time moving even while a large reference image is still being
   // uploaded and no provider task ID exists yet.
@@ -2600,6 +2612,7 @@ splitGrid=async function(n){
       const submittedImages=await Promise.all(payload.images.map((item,index)=>materializeGenerationReference(item.value,index)));
       task.resolvedPrompt=resolved;
       task.billingRequestId=task.billingRequestId||(globalThis.crypto?.randomUUID?.()||('bill-'+Date.now()+'-'+Math.random().toString(16).slice(2)));
+      task.submissionStartedAt=Date.now();
       const created=await apiFetch('/api/image/generate',{
         method:'POST',controller,timeoutMs:120000,
         headers:{'Idempotency-Key':task.billingRequestId},
@@ -2626,6 +2639,13 @@ splitGrid=async function(n){
       try{await saveProject()}catch{}
       task.apiWarnings=created.warnings||[];
       if(!created.tasks?.length)throw new Error('图片生成服务没有返回任务 ID');
+      if(task.cancelPending){
+        task.status='detached';task.phase='background';task.note='已停止等待；后台继续生成并计费，可稍后点击“找回结果”';
+        task.finishedAt=Date.now();task.durationMs=task.finishedAt-task.startedAt;
+        setNodeStatus(node,'pending','后台生成中');renderTaskQueue();scheduleSave();
+        note('已停止等待；任务已提交上游，会继续生成并计费，可稍后找回结果');
+        return;
+      }
       task.phase='generating';task.note='生成中';setNodeStatus(node,'running','生成中');renderTaskQueue();
       const result=await pollProviderTasks(created.tasks,task,node,controller);
       if(!result.successes.length){
@@ -2646,7 +2666,7 @@ splitGrid=async function(n){
       else if(delivery.confirmedCount)note('图片已确认加载成功，客户积分已正式扣除');
       else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
-      if(task.status==='canceled')return;
+      if(['canceled','detached'].includes(task.status))return;
       // Recovery may finish while the original long poll is unwinding. Never let
       // that stale timeout cover an already restored image with a failure panel.
       if(node.dataset.providerRecoveryState==='done'){
@@ -2674,12 +2694,22 @@ splitGrid=async function(n){
     const task=workflowQueue.find(t=>t.id===taskId);
     if(!task||!['pending','running'].includes(task.status))return false;
     const node=document.getElementById(task.nodeId);
+    const submitted=Boolean(task.providerTaskIds?.length||task.submissionStartedAt);
+    if(task.status==='running'&&submitted&&!task.providerTaskIds?.length){
+      task.cancelPending=true;
+      task.note='正在确认任务编号，随后停止等待；请勿关闭页面';
+      renderTaskQueue();scheduleSave();
+      if(!quiet)note('正在确认是否已提交上游，拿到任务编号后会停止等待');
+      return true;
+    }
     realAbortControllers.get(taskId)?.abort();
     if(task.status==='running'&&workflowActiveTask===task.id)workflowActiveTask=null;
-    task.status='canceled';task.phase='canceled';task.note='本地已取消';task.finishedAt=Date.now();task.durationMs=task.startedAt?task.finishedAt-task.startedAt:0;
-    if(node)setNodeStatus(node,'idle','就绪');
+    task.status=submitted?'detached':'canceled';task.phase=submitted?'background':'canceled';
+    task.note=submitted?'已停止等待；后台继续生成并计费，可稍后点击“找回结果”':'提交前已取消，不会产生上游费用';
+    task.finishedAt=Date.now();task.durationMs=task.startedAt?task.finishedAt-task.startedAt:0;
+    if(node)setNodeStatus(node,submitted?'pending':'idle',submitted?'后台生成中':'就绪');
     renderTaskQueue();scheduleSave();
-    if(!quiet)note(task.providerTaskIds?.length?'已停止等待；已提交的任务可能仍继续运行':'任务已取消');
+    if(!quiet)note(submitted?'已停止等待；上游会继续生成并计费，可稍后找回结果':'任务已在提交前取消，不会扣除积分');
     setTimeout(processWorkflowQueue,30);
     return true;
   };
@@ -3040,7 +3070,11 @@ splitGrid=async function(n){
       .filter(path=>path.dataset.a===node.id)
       .map(path=>document.getElementById(path.dataset.b)).filter(Boolean)
       .forEach(target=>{const field=target.matches('.text-node,.note-node')?target.querySelector('textarea'):null;if(field){field.value=text;field.dispatchEvent(new Event('input',{bubbles:true}));target.dataset.outputText=text}});
+    workflowQueue.filter(task=>task.nodeId===node.id&&task.type==='agent'&&task.billingRequestId===item.requestId).forEach(task=>{
+      task.status='done';task.phase='success';task.note='对话完成（已自动找回）';task.errorReason='';task.finishedAt=task.finishedAt||Date.now();
+    });
     setNodeStatus(node,'done','已找回');
+    renderTaskQueue();
     return true;
   }
 
@@ -3246,6 +3280,31 @@ splitGrid=async function(n){
   const AGENT_MODELS=['GPT 5.5 Vision · 省积分','GPT 5.5 Vision · 高质量','Gemini 3.1 Flash Lite · 省积分','Gemini 3 Flash · 标准'];
   const controllers=new Map();
   let agentBusy=false;
+  const cancelBeforeAgentRuntime=cancelWorkflowTask;
+
+  cancelWorkflowTask=function(taskId,quiet=false){
+    const task=workflowQueue.find(item=>item.id===taskId);
+    if(!task||task.type!=='agent')return cancelBeforeAgentRuntime(taskId,quiet);
+    if(!['pending','running'].includes(task.status))return false;
+    const node=document.getElementById(task.nodeId);
+    const submitted=Boolean(task.submissionStartedAt||task.billingRequestId);
+    const providerAccepted=Boolean(node?.dataset?.agentTaskId);
+    if(task.status==='running'&&submitted&&!providerAccepted){
+      task.cancelPending=true;
+      task.note='正在确认 Agent 任务编号，随后停止等待';
+      renderTaskQueue();scheduleSave();
+      if(!quiet)note('正在确认 Agent 是否已提交，拿到任务编号后会停止等待');
+      return true;
+    }
+    if(!submitted){controllers.get(taskId)?.abort();return cancelBeforeAgentRuntime(taskId,quiet)}
+    controllers.get(taskId)?.abort();
+    task.status='detached';task.phase='background';task.note='已停止等待；Agent 在后台继续并计费，可稍后点击“找回结果”';
+    task.finishedAt=Date.now();task.durationMs=task.startedAt?task.finishedAt-task.startedAt:0;
+    if(node){node.dataset.agentRecoveryState='pending';setNodeStatus(node,'pending','后台处理中')}
+    renderTaskQueue();scheduleSave();
+    if(!quiet)note('已停止等待；Agent 仍会在后台继续并计费，可稍后找回结果');
+    return true;
+  };
 
   function syncAgentModels(node){
     const select=node?.querySelector('.agent-model');if(!select)return;
@@ -3347,6 +3406,7 @@ splitGrid=async function(n){
       const compactedImages=await Promise.all(payload.images.slice(0,6).map(item=>compactAgentImage(item.value)));
       task.phase='generating';task.note='模型思考中';setNodeStatus(node,'running','思考中');renderTaskQueue();
       task.billingRequestId=task.billingRequestId||(globalThis.crypto?.randomUUID?.()||('agent-'+Date.now()+'-'+Math.random().toString(16).slice(2)));
+      task.submissionStartedAt=Date.now();
       node.dataset.agentRequestId=task.billingRequestId;
       node.dataset.agentSubmittedAt=String(Date.now());
       node.dataset.agentRecoveryState='pending';
@@ -3366,6 +3426,13 @@ splitGrid=async function(n){
       node.dataset.agentTaskId=result.taskId||node.dataset.agentTaskId||'';
       node.dataset.agentRequestId=result.requestId||task.billingRequestId;
       window.KAI_WALLET?.apply(result.wallet);
+      if(task.cancelPending&&result.accepted){
+        task.status='detached';task.phase='background';task.note='已停止等待；Agent 在后台继续并计费，可稍后点击“找回结果”';
+        task.finishedAt=Date.now();task.durationMs=task.finishedAt-started;
+        node.dataset.agentRecoveryState='pending';setNodeStatus(node,'pending','后台处理中');renderTaskQueue();scheduleSave();
+        note('已停止等待；Agent 任务会在后台继续，可稍后找回结果');
+        return;
+      }
       let finalResult=result;
       let text=String(result.text||'').trim();
       if(!text&&result.accepted){
@@ -3407,7 +3474,7 @@ splitGrid=async function(n){
       task.status='done';task.phase='success';task.note='对话完成'+chargedText;task.finishedAt=Date.now();task.durationMs=task.finishedAt-started;
       setNodeStatus(node,'done','已完成');note('Agent 已返回真实模型结果'+chargedText);
     }catch(error){
-      if(error?.name==='AbortError'||task.status==='canceled')return;
+      if(error?.name==='AbortError'||['canceled','detached'].includes(task.status))return;
       if(error?.agentPending){
         task.status='done';task.phase='pending';task.note=error.message;task.finishedAt=Date.now();task.durationMs=task.finishedAt-started;
         const box=ensureAgentResult(node);box.hidden=false;box.classList.remove('error');box.textContent='Agent 已在后台继续处理。\n可以刷新或关闭页面，稍后点击右下角“找回结果”。';

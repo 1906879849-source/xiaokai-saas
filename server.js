@@ -26,7 +26,9 @@ const GENERATED_DIR = generatedDir();
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
 app.disable('x-powered-by');
-app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '70mb' }));
+// Railway terminates TLS in front of the app. Trust exactly that first proxy so
+// req.ip is the real client address used by the abuse guards below.
+app.set('trust proxy', 1);
 
 // 方便你暂时仍用 4180 打开旧页面；正式上线建议只允许自己的域名。
 app.use((req, res, next) => {
@@ -180,7 +182,75 @@ function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', 'kai_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
 }
 
-app.post('/api/auth/register', (req, res) => {
+function positiveIntEnv(name, fallback, minimum = 1, maximum = 100000) {
+  const value = Number(process.env[name]);
+  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : fallback;
+}
+
+const rateLimitStores = new Set();
+function rateLimit({ windowMs, max, message }) {
+  const hits = new Map();
+  rateLimitStores.add(hits);
+  return (req, res, next) => {
+    const now = Date.now();
+    const key = String(req.ip || req.socket?.remoteAddress || 'unknown');
+    let entry = hits.get(key);
+    if (!entry || entry.resetAt <= now) {
+      entry = { count: 0, resetAt: now + windowMs };
+      hits.set(key, entry);
+    }
+    entry.count += 1;
+    res.setHeader('X-RateLimit-Limit', String(max));
+    res.setHeader('X-RateLimit-Remaining', String(Math.max(0, max - entry.count)));
+    res.setHeader('X-RateLimit-Reset', String(Math.ceil(entry.resetAt / 1000)));
+    if (entry.count > max) {
+      const retryAfter = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+      res.setHeader('Retry-After', String(retryAfter));
+      return res.status(429).json({ ok: false, code: 'RATE_LIMITED', error: message, retryAfter });
+    }
+    next();
+  };
+}
+
+const anonymousApiRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: positiveIntEnv('ANONYMOUS_API_RATE_LIMIT_PER_MINUTE', positiveIntEnv('API_RATE_LIMIT_PER_MINUTE', 120)),
+  message: '请求过于频繁，请稍后再试',
+});
+const loginRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: positiveIntEnv('AUTH_LOGIN_LIMIT_PER_15_MINUTES', 15),
+  message: '登录尝试过于频繁，请稍后再试',
+});
+const registerRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: positiveIntEnv('AUTH_REGISTER_LIMIT_PER_HOUR', 5),
+  message: '注册尝试过于频繁，请稍后再试',
+});
+setInterval(() => {
+  const now = Date.now();
+  rateLimitStores.forEach(store => {
+    for (const [key, value] of store) if (value.resetAt <= now) store.delete(key);
+  });
+}, 5 * 60 * 1000).unref();
+
+// Reject abusive anonymous bodies before allocating the old 70 MB allowance.
+// Signed-in canvas/image operations still keep the configurable large limit.
+const smallJson = express.json({ limit: process.env.PUBLIC_JSON_BODY_LIMIT || '256kb' });
+const largeJson = express.json({ limit: process.env.JSON_BODY_LIMIT || '70mb' });
+app.use('/api', (req, res, next) => {
+  // Authenticated task polling can legitimately be frequent (especially when a
+  // customer requests several images). Keep the broad IP limit on anonymous
+  // traffic; login and registration also have stricter dedicated limits.
+  if (accounts.sessionUser(requestToken(req))) return next();
+  return anonymousApiRateLimit(req, res, next);
+});
+app.use((req, res, next) => {
+  const signedIn = Boolean(accounts.sessionUser(requestToken(req)));
+  return (signedIn ? largeJson : smallJson)(req, res, next);
+});
+
+app.post('/api/auth/register', registerRateLimit, (req, res) => {
   try {
     const user = accounts.register(req.body || {});
     const token = accounts.createSession(user.id);
@@ -193,7 +263,7 @@ app.post('/api/auth/register', (req, res) => {
   } catch (error) { safeJsonError(res, error); }
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginRateLimit, (req, res) => {
   try {
     const user = accounts.authenticate(req.body?.username, req.body?.password);
     const token = accounts.createSession(user.id);
@@ -211,6 +281,13 @@ app.get('/api/auth/me', (req, res) => {
   if (!user) return res.status(401).json({ ok: false, error: '请先登录' });
   wallet.runAs(user.id, () => res.json({ ok: true, user, wallet: wallet.publicWallet() }));
 });
+
+function requireSignedIn(req, res, next) {
+  const user = accounts.sessionUser(requestToken(req));
+  if (!user) return res.status(401).json({ ok: false, error: '请先登录后再访问图片' });
+  req.user = user;
+  wallet.runAs(user.id, next);
+}
 
 const PUBLIC_API = new Set(['/health', '/platform/status', '/models', '/auth/register', '/auth/login', '/auth/logout', '/auth/me', '/callback/kie']);
 app.use('/api', (req, res, next) => {
@@ -920,7 +997,29 @@ app.post('/api/callback/kie', (req, res) => {
   res.json({ ok: true });
 });
 
-app.use('/generated', express.static(GENERATED_DIR, { maxAge: '7d' }));
+// Generated customer images are private. A random-looking file name is not an
+// access-control boundary: require a session and verify that the active wallet
+// actually owns a task whose settled result references this file.
+app.get('/generated/:fileName', requireSignedIn, (req, res) => {
+  let fileName = '';
+  try { fileName = decodeURIComponent(String(req.params.fileName || '')); }
+  catch { return res.status(400).json({ ok: false, error: '图片地址无效' }); }
+  if (!fileName || path.basename(fileName) !== fileName || !wallet.ownsResultUrl(`/generated/${fileName}`)) {
+    return res.status(404).json({ ok: false, error: '当前账号没有这张图片' });
+  }
+  const filePath = path.join(GENERATED_DIR, fileName);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ ok: false, error: '图片文件已丢失' });
+  res.setHeader('Cache-Control', 'private, max-age=604800, immutable');
+  res.sendFile(filePath);
+});
+
+// Keep parser failures machine-readable so the canvas can explain the problem.
+app.use((error, req, res, next) => {
+  if (error?.type === 'entity.too.large' || error?.status === 413) {
+    return res.status(413).json({ ok: false, code: 'BODY_TOO_LARGE', error: '上传内容过大，请压缩图片后重试' });
+  }
+  next(error);
+});
 // Application files must never stay on an older build after Railway deploys.
 // Generated images keep their long cache above; HTML/JS/CSS always revalidate.
 app.use(express.static(PUBLIC_DIR, {
