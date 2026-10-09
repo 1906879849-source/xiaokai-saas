@@ -2984,7 +2984,10 @@ splitGrid=async function(n){
       const runtime=window.KAI_IMAGE_RUNTIME;
       if(!runtime?.pollProviderTasks||!runtime?.applyRealResults)throw new Error('图片恢复模块尚未初始化');
       const result=await runtime.pollProviderTasks(providerTasks,task,node,controller);
-      if(!result.successes.length)throw new Error(result.failures.map(x=>x.failMsg||x.failCode).filter(Boolean).join('；')||'任务没有可恢复结果');
+      if(!result.successes.length){
+        const terminalError=new Error(result.failures.map(x=>x.failMsg||x.failCode).filter(Boolean).join('；')||'任务没有可恢复结果');
+        terminalError.providerTerminalFailure=Boolean(result.failures.length);throw terminalError;
+      }
       try{runtime.applyRealResults(node,result.urls,task.promptText,task)}
       catch(applyError){console.warn('标准恢复流程失败，改用图片直填',applyError);forceRecoveredImage(node,result.urls[0],task.promptText)}
       let delivery={confirmedCount:0,warnings:[]};
@@ -3009,10 +3012,10 @@ splitGrid=async function(n){
       return true;
     }catch(error){
       if(error?.name!=='AbortError'){
-        node.dataset.providerRecoveryState='error';
+        node.dataset.providerRecoveryState=error?.providerTerminalFailure?'failed':'error';
         node.__kaiRecoveryFailedAt=Date.now();
         window.KAI_IMAGE_RUNTIME?.showGenerationFailure?.(node,task,error?.message||'结果恢复失败','generating');
-        setNodeStatus(node,'error','恢复失败');
+        setNodeStatus(node,'error',error?.providerTerminalFailure?'失败·查看原因':'恢复失败');
         if(!quiet)note('结果恢复失败：'+(error?.message||'未知错误'));
         console.warn('图片结果恢复失败',error);
       }
@@ -3104,7 +3107,7 @@ splitGrid=async function(n){
 
   async function recoverKieTasks({manual=false,quiet=false,force=false}={}){
     const allGenerationNodes=[...document.querySelectorAll('.generation-node')];
-    const emptyNodes=allGenerationNodes.filter(node=>['missing','broken'].includes(nodeImageState(node))&&!node.__kaiLivePolling);
+    const emptyNodes=allGenerationNodes.filter(node=>['missing','broken'].includes(nodeImageState(node))&&!node.__kaiLivePolling&&(force||!['failed','error'].includes(node.dataset.providerRecoveryState||'')));
     const claimed=new Set();
     allGenerationNodes.forEach(node=>savedProviderTasks(node).forEach(x=>claimed.add(x.taskId)));
     const recoveries=[];
