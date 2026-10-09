@@ -5,7 +5,7 @@ const platformSettings = require('./platform-settings');
 const MODEL_REGISTRY = {
   'GPT Image 2': {
     provider: 'otterl', id: 'gpt-image-2', taskApi: 'otterl',
-    supportsResolution: true, resolutions: ['1K'], supportsImageInput: true,
+    supportsResolution: true, resolutions: ['1K', '2K'], supportsImageInput: true,
   },
   'GPT Image 2 · 4K 超分': {
     provider: 'otterl', id: 'gpt-image-2-4k超分', taskApi: 'otterl', fixedResolution: '4K',
@@ -17,11 +17,11 @@ const MODEL_REGISTRY = {
   },
   'GPT Image 2.5 Flare': {
     provider: 'otterl', id: 'gpt-image-2.5-flare', taskApi: 'otterl',
-    supportsResolution: true, resolutions: ['1K'], supportsImageInput: true,
+    supportsResolution: true, resolutions: ['1K', '2K'], supportsImageInput: true,
   },
   'GPT Image 2.5 Sunburst': {
     provider: 'otterl', id: 'gpt-image-2.5-sunburst', taskApi: 'otterl',
-    supportsResolution: true, resolutions: ['1K'], supportsImageInput: true,
+    supportsResolution: true, resolutions: ['1K', '2K'], supportsImageInput: true,
   },
   'Gemini 3 Pro Image': {
     provider: 'otterl', id: 'gemini-3-pro-image-preview', taskApi: 'otterl',

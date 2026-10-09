@@ -9,19 +9,22 @@ function intEnv(name, fallback) {
   return Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
+const SETTINGS_VERSION = 2;
+const GPT_2K_MIGRATION_MODELS = new Set(['GPT Image 2', 'GPT Image 2.5 Flare', 'GPT Image 2.5 Sunburst']);
+
 const DEFAULT_MODELS = [
-  { name: 'GPT Image 2', provider: 'otterl', id: 'gpt-image-2', taskApi: 'otterl', enabled: true, resolutions: ['1K'], prices: { '1K': intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24) } },
+  { name: 'GPT Image 2', provider: 'otterl', id: 'gpt-image-2', taskApi: 'otterl', enabled: true, resolutions: ['1K', '2K'], prices: { '1K': intEnv('PRICE_GPT_IMAGE_2_1K', intEnv('PRICE_GPT_IMAGE_2_STANDARD', 4)), '2K': intEnv('PRICE_GPT_IMAGE_2_2K', 5) } },
   { name: 'GPT Image 2 · 4K 超分', provider: 'otterl', id: 'gpt-image-2-4k超分', taskApi: 'otterl', enabled: true, fixedResolution: '4K', resolutions: ['4K'], prices: { '4K': intEnv('PRICE_GPT_IMAGE_2_4K_UPSCALE', 24) } },
   { name: 'GPT Image 2 · 原生 4K', provider: 'otterl', id: 'gpt-image-2-原生4k', taskApi: 'otterl', enabled: true, fixedResolution: '4K', resolutions: ['4K'], prices: { '4K': intEnv('PRICE_GPT_IMAGE_2_NATIVE_4K', 40) } },
-  { name: 'GPT Image 2.5 Flare', provider: 'otterl', id: 'gpt-image-2.5-flare', taskApi: 'otterl', enabled: true, resolutions: ['1K'], prices: { '1K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24) } },
-  { name: 'GPT Image 2.5 Sunburst', provider: 'otterl', id: 'gpt-image-2.5-sunburst', taskApi: 'otterl', enabled: true, resolutions: ['1K'], prices: { '1K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24) } },
+  { name: 'GPT Image 2.5 Flare', provider: 'otterl', id: 'gpt-image-2.5-flare', taskApi: 'otterl', enabled: true, resolutions: ['1K', '2K'], prices: { '1K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_1K', intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 7)), '2K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_2K', 8) } },
+  { name: 'GPT Image 2.5 Sunburst', provider: 'otterl', id: 'gpt-image-2.5-sunburst', taskApi: 'otterl', enabled: true, resolutions: ['1K', '2K'], prices: { '1K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_1K', intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 7)), '2K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_2K', 8) } },
   { name: 'Gemini 3 Pro Image', provider: 'otterl', id: 'gemini-3-pro-image-preview', taskApi: 'otterl', enabled: true, resolutions: ['1K', '2K', '4K'], prices: { '1K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_1K', 80), '2K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_2K', 80), '4K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_4K', 80) } },
   { name: 'Gemini 3.1 Flash Image', provider: 'otterl', id: 'gemini-3.1-flash-image-preview', taskApi: 'otterl', enabled: true, resolutions: ['1K', '2K', '4K'], prices: { '1K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_1K', 60), '2K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_2K', 60), '4K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_4K', 60) } },
 ];
 
 function defaults() {
   return {
-    version: 1,
+    version: SETTINGS_VERSION,
     updatedAt: Date.now(),
     maintenance: { enabled: false, title: '系统维护中', message: '正在进行服务升级，请稍后再试。', expectedEnd: '' },
     models: DEFAULT_MODELS.map(item => ({ ...item, resolutions: [...item.resolutions], prices: { ...item.prices } })),
@@ -57,8 +60,9 @@ function normalize(raw = {}) {
   const base = defaults();
   const byName = new Map((Array.isArray(raw.models) ? raw.models : []).map(item => [String(item?.name || ''), item]));
   const maintenance = raw.maintenance || {};
+  const rawVersion = Number(raw.version) || 1;
   return {
-    version: 1,
+    version: SETTINGS_VERSION,
     updatedAt: Number(raw.updatedAt) || base.updatedAt,
     updatedBy: String(raw.updatedBy || '').slice(0, 120),
     maintenance: {
@@ -67,7 +71,20 @@ function normalize(raw = {}) {
       message: String(maintenance.message || base.maintenance.message).trim().slice(0, 1000) || base.maintenance.message,
       expectedEnd: String(maintenance.expectedEnd || '').trim().slice(0, 80),
     },
-    models: base.models.map(fallback => normalizeModel(byName.get(fallback.name), fallback)),
+    models: base.models.map(fallback => {
+      const saved = byName.get(fallback.name);
+      // Version 1 installations persisted the old 1K-only GPT configuration on
+      // Railway volumes. Upgrade those models once so the new defaults are not
+      // hidden by the existing platform-settings.json file.
+      if (rawVersion < SETTINGS_VERSION && GPT_2K_MIGRATION_MODELS.has(fallback.name)) {
+        return normalizeModel({
+          ...saved,
+          resolutions: fallback.resolutions,
+          prices: fallback.prices,
+        }, fallback);
+      }
+      return normalizeModel(saved, fallback);
+    }),
   };
 }
 

@@ -29,11 +29,11 @@ const MODEL_IDS = {
 const FIXED_4K_MODELS = new Set(['GPT Image 2 · 4K 超分', 'GPT Image 2 · 原生 4K']);
 const GEMINI_IMAGE_MODELS = new Set(['Gemini 3 Pro Image', 'Gemini 3.1 Flash Image']);
 const MODEL_RESOLUTIONS = {
-  'GPT Image 2': ['1K'],
+  'GPT Image 2': ['1K', '2K'],
   'GPT Image 2 · 4K 超分': ['4K'],
   'GPT Image 2 · 原生 4K': ['4K'],
-  'GPT Image 2.5 Flare': ['1K'],
-  'GPT Image 2.5 Sunburst': ['1K'],
+  'GPT Image 2.5 Flare': ['1K', '2K'],
+  'GPT Image 2.5 Sunburst': ['1K', '2K'],
   'Gemini 3 Pro Image': ['1K', '2K', '4K'],
   'Gemini 3.1 Flash Image': ['1K', '2K', '4K'],
 };
