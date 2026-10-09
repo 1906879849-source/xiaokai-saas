@@ -111,11 +111,30 @@ async function imageToBlob(source, task = null) {
       headers.Cookie = task.referenceCookie;
     }
   } catch {}
-  const response = await fetch(value, { headers });
-  if (!response.ok) throw new Error(`读取参考图失败：HTTP ${response.status}`);
-  return new Blob([await response.arrayBuffer()], {
-    type: response.headers.get('content-type') || 'image/png',
-  });
+  let lastError = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    try {
+      const response = await fetch(value, { headers, signal: controller.signal });
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}`);
+        error.statusCode = response.status;
+        throw error;
+      }
+      return new Blob([await response.arrayBuffer()], {
+        type: response.headers.get('content-type') || 'image/png',
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt >= 2 || (error?.statusCode && error.statusCode < 500)) break;
+      await new Promise(resolve => setTimeout(resolve, 450));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  const reason = lastError?.name === 'AbortError' ? '请求超时' : (lastError?.message || '未知错误');
+  throw new Error(`读取参考图失败：${reason}`);
 }
 
 async function otterFetch(pathname, options = {}) {
@@ -215,8 +234,10 @@ function extractGeminiResultUrls(json) {
 
 async function geminiRequestBody(task) {
   const parts = [{ text: task.prompt }];
-  for (const source of task.imageUrls) {
-    const blob = await imageToBlob(source, task);
+  for (let index = 0; index < task.imageUrls.length; index += 1) {
+    let blob;
+    try { blob = await imageToBlob(task.imageUrls[index], task); }
+    catch (error) { throw new Error(`第 ${index + 1} 张参考图无法读取：${error?.message || '未知错误'}`); }
     parts.push({
       inlineData: {
         mimeType: blob.type || 'image/png',
@@ -540,7 +561,9 @@ async function runTask(task) {
       const form = new FormData();
       Object.entries(common).forEach(([key, value]) => form.append(key, String(value)));
       for (let index = 0; index < task.imageUrls.length; index += 1) {
-        const blob = await imageToBlob(task.imageUrls[index], task);
+        let blob;
+        try { blob = await imageToBlob(task.imageUrls[index], task); }
+        catch (error) { throw new Error(`第 ${index + 1} 张参考图无法读取：${error?.message || '未知错误'}`); }
         const ext = fileExtension(blob.type);
         form.append('image[]', blob, `reference-${index + 1}.${ext}`);
       }
@@ -700,4 +723,7 @@ async function getTask(taskId) {
   };
 }
 
-module.exports = { configured, supportsModel, createImageTask, getTask, getPublicPricing };
+// The HTTP delivery route uses the same normalizer as the background cache. This
+// guarantees the selected ratio even when saving the upstream temporary URL to
+// Railway storage failed and the route must proxy the original image directly.
+module.exports = { configured, supportsModel, createImageTask, getTask, getPublicPricing, normalizeDeliveryImage: normalizeGeneratedImage };
