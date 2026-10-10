@@ -9,7 +9,7 @@ const kie = require('./src/providers/kie');
 const mockImage = require('./src/providers/mock-image');
 const otterlImage = require('./src/providers/otterl-image');
 const rivoImage = require('./src/providers/rivo-image');
-const otterlChat = require('./src/providers/otterl-chat');
+const rivoChat = require('./src/providers/rivo-chat');
 const wallet = require('./src/wallet');
 const agentPricing = require('./src/agent-pricing');
 const accounts = require('./src/accounts');
@@ -166,7 +166,9 @@ app.get('/api/health', (req, res) => {
     imageProvider: preferredImageProvider(),
     pointValueRmb: wallet.pointValueRmb(),
     models: listModels(),
-    agentModels: otterlChat.listModels(),
+    agentModels: rivoChat.listModels(),
+    agentProvider: 'rivo',
+    agentProviderConfigured: rivoChat.configured(),
   });
 });
 
@@ -450,8 +452,8 @@ app.post('/api/agent/run', async (req, res) => {
   try {
     const body = req.body || {};
     const model = String(body.model || '').trim();
-    if (!otterlChat.listModels().includes(model)) {
-      return res.status(400).json({ ok: false, error: `Agent 模型暂未接入：${model || '未选择'}`, supportedModels: otterlChat.listModels() });
+    if (!rivoChat.listModels().includes(model)) {
+      return res.status(400).json({ ok: false, error: `Agent 模型暂未接入：${model || '未选择'}`, supportedModels: rivoChat.listModels() });
     }
     const rawImages = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
     const price = agentPricing.estimate(model);
@@ -463,7 +465,7 @@ app.post('/api/agent/run', async (req, res) => {
       const prior = wallet.taskByRequest(requestId);
       if (prior?.state === 'charged' && prior.resultText) {
         return res.json({
-          ok: true, recovered: true, provider: 'otterl',
+          ok: true, recovered: true, provider: 'rivo',
           taskId: prior.taskId, requestId,
           model: prior.agentModel || model,
           providerModel: prior.providerModel || '',
@@ -474,7 +476,7 @@ app.post('/api/agent/run', async (req, res) => {
       }
       if (prior?.state === 'reserved') {
         return res.status(202).json({
-          ok: true, accepted: true, recovered: true, provider: 'otterl',
+          ok: true, accepted: true, recovered: true, provider: 'rivo',
           taskId: prior.taskId, requestId,
           model: prior.agentModel || model,
           state: 'processing',
@@ -501,8 +503,8 @@ app.post('/api/agent/run', async (req, res) => {
     };
     setImmediate(() => wallet.runAs(userId, async () => {
       try {
-        const imageUrls = await otterlChat.prepareImageUrls(agentInput.rawImages);
-        const result = await otterlChat.runAgent({ ...agentInput, imageUrls });
+        const imageUrls = await rivoChat.prepareImageUrls(agentInput.rawImages);
+        const result = await rivoChat.runAgent({ ...agentInput, imageUrls });
         const actualQuote = agentPricing.quoteFromUsage(model, result.usage);
         wallet.settleVariableTask(billingTaskId, true, actualQuote.total, {
           providerCredits: result.providerCredits, usage: result.usage, quote: actualQuote, kind: 'agent',
@@ -515,7 +517,7 @@ app.post('/api/agent/run', async (req, res) => {
     }));
 
     res.status(202).json({
-      ok: true, accepted: true, provider: 'otterl',
+      ok: true, accepted: true, provider: 'rivo',
       taskId: billingTaskId, requestId, model, state: 'processing',
       quote: price, wallet: wallet.publicWallet(),
     });
