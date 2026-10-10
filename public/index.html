@@ -2814,35 +2814,59 @@ splitGrid=async function(n){
       if(!workflowQueue.some(task=>task.id===id&&task.status==='running'))sharedConcurrency.active.delete(id);
     }
   }
-  function dispatchPendingGeneration(){
-    cleanupGenerationSlots();
-    if(activeGenerationTasks.size>=MAX_PARALLEL_GENERATIONS||sharedConcurrency.active.size>=sharedConcurrency.max)return false;
-    const hasOrderedRun=workflowQueue.some(task=>task.status==='running'&&task.workflowRunId);
-    const next=workflowQueue.find(task=>task.status==='pending'&&task.type==='generation'
-      &&!workflowQueue.some(active=>active.status==='running'&&active.nodeId===task.nodeId)
-      &&(!task.workflowRunId||(!hasOrderedRun&&workflowQueue.find(item=>item.status==='pending'&&item.workflowRunId===task.workflowRunId)===task)));
-    if(!next)return false;
-    const node=document.getElementById(next.nodeId);
-    if(!node){next.status='error';next.phase='failed';next.note='节点不存在';next.finishedAt=Date.now();renderTaskQueue();setTimeout(dispatchPendingGeneration,50);return true}
-    if(!isRealModel(next.model)){
-      next.status='error';next.phase='failed';next.note='当前模型没有可用的图片接口';next.errorReason=next.note;next.finishedAt=Date.now();
-      showGenerationFailure(node,next,next.errorReason,'uploading');
-      setNodeStatus(node,'error','模型未接入');renderTaskQueue();scheduleSave();setTimeout(dispatchPendingGeneration,50);return true;
+  function prepareGenerationTask(task,node){
+    if(!task.createdAt)task.createdAt=Date.now();
+    if(!task.model)task.model=node?.dataset.modelName||currentModelName();
+    if(!task.sizeState)task.sizeState=node?.dataset.sizeState||currentSizeStateJSON();
+    if(!task.sizeLabel){
+      const state=parseState(task.sizeState);
+      task.sizeLabel=state?.title||state?.text||currentSizeSummary();
     }
-    enrichTask(next,node);
-    activeGenerationTasks.add(next.id);
-    sharedConcurrency.active.add(next.id);
-    next.status='running';next.phase='uploading';next.startedAt=next.startedAt||Date.now();
-    renderTaskQueue();scheduleSave();
-    Promise.resolve().then(()=>runRealGeneration(next,node)).catch(error=>{
-      if(['done','error','canceled','detached'].includes(next.status))return;
-      next.status='error';next.phase='failed';next.errorReason=error?.message||'图片任务启动失败';next.note=next.errorReason;next.finishedAt=Date.now();
-      showGenerationFailure(node,next,next.errorReason,'uploading');setNodeStatus(node,'error','启动失败');note('图片任务启动失败：'+next.errorReason);
-    }).finally(()=>{
-      activeGenerationTasks.delete(next.id);sharedConcurrency.active.delete(next.id);renderTaskQueue();scheduleSave();setTimeout(dispatchPendingGeneration,100)
-    });
-    setTimeout(dispatchPendingGeneration,0);
-    return true;
+    if(node?.classList.contains('generation-node')){
+      if(task.promptText==null)task.promptText=(node.dataset.promptText||promptBox.value||'').trim();
+      if(task.promptHtml==null)task.promptHtml=node.dataset.promptHtml||'';
+    }
+    return task;
+  }
+  function dispatchPendingGeneration(){
+    let next=null,node=null;
+    try{
+      cleanupGenerationSlots();
+      if(activeGenerationTasks.size>=MAX_PARALLEL_GENERATIONS||sharedConcurrency.active.size>=sharedConcurrency.max)return false;
+      const hasOrderedRun=workflowQueue.some(task=>task.status==='running'&&task.workflowRunId);
+      next=workflowQueue.find(task=>task.status==='pending'&&task.type==='generation'
+        &&!workflowQueue.some(active=>active.status==='running'&&active.nodeId===task.nodeId)
+        &&(!task.workflowRunId||(!hasOrderedRun&&workflowQueue.find(item=>item.status==='pending'&&item.workflowRunId===task.workflowRunId)===task)));
+      if(!next)return false;
+      node=document.getElementById(next.nodeId);
+      if(!node){next.status='error';next.phase='failed';next.note='节点不存在';next.finishedAt=Date.now();renderTaskQueue();setTimeout(dispatchPendingGeneration,50);return true}
+      prepareGenerationTask(next,node);
+      if(!isRealModel(next.model)){
+        next.status='error';next.phase='failed';next.note='当前模型没有可用的图片接口';next.errorReason=next.note;next.finishedAt=Date.now();
+        showGenerationFailure(node,next,next.errorReason,'uploading');
+        setNodeStatus(node,'error','模型未接入');renderTaskQueue();scheduleSave();setTimeout(dispatchPendingGeneration,50);return true;
+      }
+      activeGenerationTasks.add(next.id);
+      sharedConcurrency.active.add(next.id);
+      next.status='running';next.phase='uploading';next.startedAt=next.startedAt||Date.now();
+      renderTaskQueue();scheduleSave();
+      Promise.resolve().then(()=>runRealGeneration(next,node)).catch(error=>{
+        if(['done','error','canceled','detached'].includes(next.status))return;
+        next.status='error';next.phase='failed';next.errorReason=error?.message||'图片任务启动失败';next.note=next.errorReason;next.finishedAt=Date.now();
+        showGenerationFailure(node,next,next.errorReason,'uploading');setNodeStatus(node,'error','启动失败');note('图片任务启动失败：'+next.errorReason);
+      }).finally(()=>{
+        activeGenerationTasks.delete(next.id);sharedConcurrency.active.delete(next.id);renderTaskQueue();scheduleSave();setTimeout(dispatchPendingGeneration,100)
+      });
+      setTimeout(dispatchPendingGeneration,0);
+      return true;
+    }catch(error){
+      if(!next)return false;
+      next.status='error';next.phase='failed';next.errorReason=error?.message||'图片任务调度失败';next.note=next.errorReason;next.finishedAt=Date.now();
+      if(node){showGenerationFailure(node,next,next.errorReason,'uploading');setNodeStatus(node,'error','调度失败')}
+      activeGenerationTasks.delete(next.id);sharedConcurrency.active.delete(next.id);renderTaskQueue();scheduleSave();note('图片任务调度失败：'+next.errorReason);
+      setTimeout(dispatchPendingGeneration,100);
+      return true;
+    }
   }
   processWorkflowQueue=async function(){
     const activeTask=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
