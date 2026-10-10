@@ -76,6 +76,24 @@ function normalizeBackground(value) {
   return /透明|transparent/i.test(String(value || '')) ? 'transparent' : 'auto';
 }
 
+function friendlyGenerationError(error, task) {
+  const status = Number(error?.statusCode || 0);
+  const native4k = task?.modelName === 'GPT Image 2 · 原生 4K';
+  if (status === 451) {
+    return '上游服务拒绝了该请求（HTTP 451），通常是参考图或提示词触发内容审核；请更换参考图或调整描述后重试';
+  }
+  if (status === 502 || status === 504 || /gateway\s*time-?out|upstream.*timed?\s*out/i.test(String(error?.message || ''))) {
+    return native4k
+      ? `原生 4K 上游在规定时间内未返回结果（HTTP ${status || 502}）；本次未成功交付，请稍后重试或改用“GPT Image 2 · 4K 超分”`
+      : `上游图片服务暂时无响应（HTTP ${status || 502}），请稍后重试`;
+  }
+  const raw = String(error?.message || 'OtterL 图片生成失败').trim();
+  if (/<\/?(?:html|head|body|title|center)\b/i.test(raw)) {
+    return `上游图片服务返回了异常网页${status ? `（HTTP ${status}）` : ''}，请稍后重试`;
+  }
+  return raw.replace(/\s+/g, ' ').slice(0, 360);
+}
+
 function openAiImageOptions(aspectRatio, resolution) {
   const explicitRatio = aspectRatio !== 'auto';
   return {
@@ -350,11 +368,21 @@ function contentTypeFromFormat(format, fallback = 'image/png') {
 }
 
 async function normalizeGeneratedImage(buffer, contentType, task) {
-  const target = canonicalOutputSize(task?.aspectRatio, task?.resolution);
-  if (!target) return { buffer, contentType, adjusted: false };
   const metadata = await sharp(buffer).metadata();
   const sourceWidth = Number(metadata.autoOrient?.width || metadata.width || 0);
   const sourceHeight = Number(metadata.autoOrient?.height || metadata.height || 0);
+  let target = canonicalOutputSize(task?.aspectRatio, task?.resolution);
+  if (!target && sourceWidth > 0 && sourceHeight > 0 && ['2K', '4K'].includes(task?.resolution)) {
+    const longSide = task.resolution === '4K' ? 4096 : 2048;
+    target = sourceWidth >= sourceHeight
+      ? { width: longSide, height: Math.max(1, Math.round(longSide * sourceHeight / sourceWidth)) }
+      : { width: Math.max(1, Math.round(longSide * sourceWidth / sourceHeight)), height: longSide };
+  }
+  if (!target) {
+    task.outputWidth = sourceWidth;
+    task.outputHeight = sourceHeight;
+    return { buffer, contentType, adjusted: false };
+  }
   const result = await sharp(buffer)
     .rotate()
     .resize(target.width, target.height, { fit: 'cover', position: 'centre' })
@@ -405,7 +433,7 @@ async function cacheResultUrls(taskId, urls, task = null) {
           buffer = Buffer.from(await response.arrayBuffer());
         }
         if (!buffer?.length) throw new Error('图片内容为空');
-        if (task && task.aspectRatio !== 'auto') {
+        if (task && (task.aspectRatio !== 'auto' || ['2K', '4K'].includes(task.resolution))) {
           const normalized = await normalizeGeneratedImage(buffer, contentType, task);
           buffer = normalized.buffer;
           contentType = normalized.contentType;
@@ -590,7 +618,8 @@ async function runTask(task) {
     task.resultUrls = task.sourceResultUrls.slice();
     // Explicit ratios are normalized before success is exposed to the browser. This
     // prevents a temporary upstream 3:2 image from appearing for a 9:16 request.
-    if (task.aspectRatio !== 'auto') {
+    const requiresVerifiedLocalOutput = task.aspectRatio !== 'auto' || ['2K', '4K'].includes(task.resolution);
+    if (requiresVerifiedLocalOutput) {
       task.progress = 92;
       persistTask(task);
       const cached = await cacheResultUrls(task.taskId, task.sourceResultUrls, task);
@@ -609,12 +638,12 @@ async function runTask(task) {
     task.creditsConsumed = json?.usage?.total_tokens ?? json?.usageMetadata?.totalTokenCount ?? null;
     task.finishedAt = Date.now();
     persistTask(task);
-    if (task.aspectRatio === 'auto') cacheTaskResultsInBackground(task);
+    if (!requiresVerifiedLocalOutput) cacheTaskResultsInBackground(task);
   } catch (error) {
     task.state = 'fail';
     task.progress = 100;
     task.failCode = error?.name === 'AbortError' ? 'OTTERL_TIMEOUT' : 'OTTERL_GENERATION_FAILED';
-    task.failMsg = error?.name === 'AbortError' ? 'OtterL 生成超时' : (error?.message || 'OtterL 图片生成失败');
+    task.failMsg = error?.name === 'AbortError' ? 'OtterL 生成超时' : friendlyGenerationError(error, task);
   } finally {
     task.finishedAt = Date.now();
     persistTask(task);
