@@ -419,6 +419,15 @@ function taskByRequest(requestId) {
   return item ? { ...item } : null;
 }
 
+function tasksByRequest(requestId) {
+  const reservationId = store.requests[String(requestId || '')];
+  if (!reservationId) return [];
+  return Object.values(store.tasks)
+    .filter(task => task.reservationId === reservationId)
+    .sort((a, b) => Number(a.createdAt || 0) - Number(b.createdAt || 0))
+    .map(item => ({ ...item }));
+}
+
 function recentAgentResults(limit = 20) {
   return Object.values(store.tasks)
     .filter(item => item.taskApi === 'agent' && item.state === 'charged' && String(item.resultText || '').trim())
@@ -446,5 +455,6 @@ function pointValueRmb() { return POINT_VALUE_RMB; }
 module.exports = {
   publicWallet, quote, reserve, attachTasks, releaseUnattached,
   settleTask, settleVariableTask, recentLedger, pendingTasks, recentTasks, hasTask, ownsResultUrl, pricing, pointValueRmb, grant,
+  tasksByRequest,
   taskByRequest, recentAgentResults, releaseExpiredTasks, runAs, listUserIds,
 };
