@@ -1377,11 +1377,12 @@ function cancelWorkflowTask(taskId,quiet=false){
   return true;
 }
 function clearWorkflowQueue(){
-  if(workflowTimer){clearTimeout(workflowTimer);workflowTimer=null}
-  workflowActiveTask=null;
-  workflowQueue.forEach(task=>{if(['pending','running'].includes(task.status)){const node=document.getElementById(task.nodeId);if(node)setNodeStatus(node,'idle','就绪')}});
-  workflowQueue.length=0;
-  renderTaskQueue();scheduleSave();note('任务队列已清空');
+  // “清空”只删除历史记录。运行中任务可能已经开始上传或提交上游，
+  // 静默删除会造成节点仍在运行、队列却显示为空，并失去找回入口。
+  const active=workflowQueue.filter(task=>['pending','running','detached'].includes(task.status));
+  workflowQueue.splice(0,workflowQueue.length,...active);
+  renderTaskQueue();scheduleSave();
+  note(active.length?'已清除历史记录；运行和等待中的任务已保留':'任务历史已清空');
 }
 processWorkflowQueue=function(){
   if(workflowActiveTask)return;
@@ -2555,7 +2556,13 @@ splitGrid=async function(n){
     // reduces large 4K references before the generation request is submitted.
     try{
       let image=loadedCanvasImage(value);
-      if(!image){image=new Image();image.src=value;await image.decode()}
+      if(!image){
+        image=new Image();image.src=value;
+        await Promise.race([
+          image.decode(),
+          new Promise((_,reject)=>setTimeout(()=>reject(new Error('参考图读取超过 15 秒')),15000))
+        ]);
+      }
       const maxSide=2048,scale=Math.min(1,maxSide/Math.max(image.naturalWidth,image.naturalHeight));
       const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
       const context=canvas.getContext('2d');context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);
@@ -2650,6 +2657,7 @@ splitGrid=async function(n){
       if(!resolved.trim())throw new Error('请输入生图 Prompt');
       const params=taskParams(task,node);
       task.note=payload.images.length?'正在整理并压缩参考图':'正在提交生图任务';renderTaskQueue();
+      setNodeStatus(node,'running',payload.images.length?'整理参考图':'准备提交');
       const submittedImages=await Promise.all(payload.images.map((item,index)=>materializeGenerationReference(item.value,index)));
       task.resolvedPrompt=resolved;
       task.billingRequestId=task.billingRequestId||(globalThis.crypto?.randomUUID?.()||('bill-'+Date.now()+'-'+Math.random().toString(16).slice(2)));
@@ -2661,12 +2669,14 @@ splitGrid=async function(n){
       node.dataset.providerSubmittedAt=String(task.submissionStartedAt);
       node.dataset.providerRecoveryState='submitting';
       scheduleSave();
-      try{await saveProject()}catch{}
+      // 保存任务恢复信息不能无限阻塞真正的上游提交。
+      try{await Promise.race([saveProject(),delay(4000)])}catch{}
+      task.note='正在提交 Rivo';setNodeStatus(node,'running','提交 Rivo');renderTaskQueue();
       const created=await apiFetch('/api/image/generate',{
         method:'POST',controller,timeoutMs:120000,
         headers:{'Idempotency-Key':task.billingRequestId},
         body:{
-          provider:task.model==='test-image'?'mock':'kie',model:task.model,prompt:resolved,
+          provider:task.model==='test-image'?'mock':'rivo',model:task.model,prompt:resolved,
           aspectRatio:params.aspectRatio,resolution:params.resolution,count:params.count,
           background:params.background,
           operation:node.dataset.imageOperation||'',
@@ -3093,7 +3103,8 @@ splitGrid=async function(n){
 
   async function recoverNode(node,providerTasks,{legacy=false,quiet=false,force=false}={}){
     const imageState=nodeImageState(node);
-    if(!node?.isConnected||['ready','loading'].includes(imageState)||recoveringNodes.has(node)||!providerTasks.length)return false;
+    const replacingOldImage=['running','pending'].includes(node?.dataset.runState||'')&&node?.dataset.providerRecoveryState!=='done';
+    if(!node?.isConnected||(['ready','loading'].includes(imageState)&&!replacingOldImage)||recoveringNodes.has(node)||!providerTasks.length)return false;
     if(!force&&node.__kaiRecoveryFailedAt&&Date.now()-node.__kaiRecoveryFailedAt<30000)return false;
     recoveringNodes.add(node);
     const controller=new AbortController();
@@ -3238,7 +3249,14 @@ splitGrid=async function(n){
 
   async function recoverKieTasks({manual=false,quiet=false,force=false}={}){
     const allGenerationNodes=[...document.querySelectorAll('.generation-node')];
-    const emptyNodes=allGenerationNodes.filter(node=>['missing','broken'].includes(nodeImageState(node))&&!node.__kaiLivePolling&&(force||!['failed','error'].includes(node.dataset.providerRecoveryState||'')));
+    const emptyNodes=allGenerationNodes.filter(node=>{
+      if(node.__kaiLivePolling||(!force&&['failed','error'].includes(node.dataset.providerRecoveryState||'')))return false;
+      const missing=['missing','broken'].includes(nodeImageState(node));
+      const replacingOldImage=['running','pending'].includes(node.dataset.runState||'')
+        && node.dataset.providerRecoveryState!=='done'
+        && (savedProviderTasks(node).length||node.dataset.providerRequestId);
+      return missing||replacingOldImage;
+    });
     const claimed=new Set();
     allGenerationNodes.forEach(node=>savedProviderTasks(node).forEach(x=>claimed.add(x.taskId)));
     const recoveries=[];
@@ -3262,6 +3280,10 @@ splitGrid=async function(n){
         }
       }
       if(tasks.length)recoveries.push(recoverNode(node,tasks,{quiet:manual,force}));
+      else if(requestId&&Date.now()-Number(node.dataset.providerSubmittedAt||0)>60000){
+        node.dataset.providerRecoveryState='not-submitted';
+        setNodeStatus(node,'idle','未提交');
+      }
     }
 
     if(manual){
@@ -3292,6 +3314,19 @@ splitGrid=async function(n){
     return Promise.all(recoveries);
   }
 
+  function resetOrphanedRunStates(){
+    document.querySelectorAll('.generation-node').forEach(node=>{
+      if(!['running','pending'].includes(node.dataset.runState||''))return;
+      if(node.__kaiLivePolling||savedProviderTasks(node).length||node.dataset.providerRequestId)return;
+      setNodeStatus(node,'idle','就绪');
+    });
+    document.querySelectorAll('.agent-node').forEach(node=>{
+      if(!['running','pending'].includes(node.dataset.runState||''))return;
+      if(node.dataset.agentRequestId)return;
+      setNodeStatus(node,'idle','就绪');
+    });
+  }
+
   document.getElementById('recoverTaskResults')?.addEventListener('click',async event=>{
     event.stopPropagation();
     if(manualRecoveryBusy){note('正在查询后台任务，请稍候');return}
@@ -3314,10 +3349,12 @@ splitGrid=async function(n){
     const result=restoreProjectBeforeKieRecovery(data);
     setTimeout(recoverKieTasks,180);
     setTimeout(recoverAgentResults,260);
+    setTimeout(resetOrphanedRunStates,1600);
     return result;
   };
   setTimeout(recoverKieTasks,900);
   setTimeout(recoverAgentResults,1100);
+  setTimeout(resetOrphanedRunStates,1800);
   let taskEventSource=null;
   let taskStreamSignature='';
   let backgroundSyncBusy=false;
@@ -3326,7 +3363,8 @@ splitGrid=async function(n){
   function currentTaskBindings(){
     const images=[];
     document.querySelectorAll('.generation-node').forEach(node=>{
-      if(['ready','loading'].includes(nodeImageState(node)))return;
+      const replacingOldImage=['running','pending'].includes(node.dataset.runState||'')&&node.dataset.providerRecoveryState!=='done';
+      if(['ready','loading'].includes(nodeImageState(node))&&!replacingOldImage)return;
       savedProviderTasks(node).forEach(item=>images.push({taskId:item.taskId,taskApi:item.taskApi||'market'}));
     });
     const agents=[...document.querySelectorAll('.agent-node')]
