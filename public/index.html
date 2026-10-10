@@ -375,8 +375,11 @@
     .task-queue-head { display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid #272a30; color:#f1f3f6; font-size:13px; }
     .task-queue-head b { font-size:13px; }
     .task-queue-head span { color:#9197a2; font-size:12px; }
-    .task-queue-list { max-height:208px; overflow:auto; padding:8px; display:flex; flex-direction:column; gap:8px; }
-    .task-queue-list::-webkit-scrollbar { width:0; height:0; display:none; }
+    .task-queue-list { max-height:min(360px,calc(100vh - 360px)); overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:#626a78 #17191d; padding:8px; display:flex; flex-direction:column; gap:8px; }
+    .task-queue-list::-webkit-scrollbar { width:8px; }
+    .task-queue-list::-webkit-scrollbar-track { background:#17191d; border-radius:999px; }
+    .task-queue-list::-webkit-scrollbar-thumb { background:#626a78; border:2px solid #17191d; border-radius:999px; }
+    .task-queue-list::-webkit-scrollbar-thumb:hover { background:#89919f; }
     .task-queue-item { display:grid; grid-template-columns:auto 1fr; gap:10px; padding:8px 9px; border:1px solid #252930; border-radius:11px; background:#14161a; color:#d8dce3; }
     .task-queue-item .task-dot { width:9px; height:9px; margin-top:5px; border-radius:50%; background:#6e7480; }
     .task-queue-item.pending .task-dot { background:#f2bc4f; }
@@ -2129,6 +2132,16 @@ splitGrid=async function(n){
     });
     note('已按原参数重新加入任务队列');
   }
+  function dismissWorkflowTask(taskId){
+    const index=workflowQueue.findIndex(task=>task.id===taskId);
+    if(index<0)return false;
+    const task=workflowQueue[index];
+    if(['pending','running'].includes(task.status))return cancelWorkflowTask(taskId);
+    workflowQueue.splice(index,1);
+    renderTaskQueue();scheduleSave();
+    note('已移除该任务记录');
+    return true;
+  }
   queueNodeExecution=function(node,options={}){
     if(!node?.isConnected)return note('请先选择一个可运行节点');
     const type=node.classList.contains('agent-node')?'agent':node.classList.contains('generation-node')?'generation':null;
@@ -2238,11 +2251,12 @@ splitGrid=async function(n){
       const rerun=row.querySelector('.task-rerun');
       const cancel=row.querySelector('.task-cancel');
       rerun.hidden=!['done','error','canceled'].includes(task.status);
-      cancel.hidden=!['pending','running'].includes(task.status)||Boolean(task.cancelPending);
+      cancel.hidden=Boolean(task.cancelPending);
       const submitted=Boolean(task.providerTaskIds?.length||task.submissionStartedAt||task.billingRequestId);
-      cancel.title=submitted?'停止本地等待；已提交的任务会在后台继续并计费':'取消尚未提交的任务';
+      const active=['pending','running'].includes(task.status);
+      cancel.title=active?(submitted?'停止本地等待；已提交的任务会在后台继续并计费':'取消尚未提交的任务'):'移除这条任务记录';
       rerun.onclick=e=>{e.stopPropagation();rerunWorkflowTask(task)};
-      cancel.onclick=e=>{e.stopPropagation();cancelWorkflowTask(task.id)};
+      cancel.onclick=e=>{e.stopPropagation();dismissWorkflowTask(task.id)};
       taskQueueListEl.appendChild(row)
     });
     const cancelActive=document.getElementById('cancelActiveTask');
