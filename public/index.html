@@ -723,7 +723,7 @@
     article.querySelectorAll('select').forEach(s=>{bindFieldHistory(s);s.addEventListener('change',scheduleSave)});
     if(runButton)runButton.onclick=e=>{e.stopPropagation();note('Agent 节点已就绪，配置模型 API 后即可运行')}
   }
-  function createAgentNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom){const article=document.createElement('article');article.className='node agent-node';article.id='agent-'+Date.now();article.style.left=x+'px';article.style.top=y+'px';article.innerHTML='<div class="node-label">✦　自定义代理</div><div class="card agent-card"><div class="agent-node-head"><b>Agent 工作流</b><select class="agent-model"><option>GPT 5.5 Vision · 省积分</option><option>GPT 5.5 Vision · 高质量</option><option>Gemini 3.1 Flash Lite · 省积分</option><option>Gemini 3 Flash · 标准</option></select><select class="agent-skill"><option>无 Skill</option><option>加载 Skill 文件…</option></select><input class="agent-skill-file" type="file" accept=".md" hidden></div><div class="agent-fields"><div class="agent-field"><label>元提示词</label><textarea placeholder="设定身份、风格和工作规则……"></textarea></div><div class="agent-field"><label>用户需求</label><textarea placeholder="输入任务，或通过连线、@ 引用图片……"></textarea></div><div class="agent-output"><label>输出内容</label><select><option>输出文字</option></select></div></div><button class="agent-run">运行 Agent</button></div><button class="plus">+</button>';world.appendChild(article);nodes.push(article);bindNode(article);bindAgentNode(article);selectNode(article);commitHistory({undo:()=>article.remove(),redo:()=>{world.appendChild(article);selectNode(article)}});return article}
+  function createAgentNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom){const article=document.createElement('article');article.className='node agent-node';article.id='agent-'+Date.now();article.style.left=x+'px';article.style.top=y+'px';article.innerHTML='<div class="node-label">✦　自定义代理</div><div class="card agent-card"><div class="agent-node-head"><b>Agent 工作流</b><select class="agent-model"><option>GPT 5.5</option><option>GPT 5.6 Luna</option><option>Gemini 3.5 Flash</option><option>Gemini 3.1 Pro Preview</option></select><select class="agent-skill"><option>无 Skill</option><option>加载 Skill 文件…</option></select><input class="agent-skill-file" type="file" accept=".md" hidden></div><div class="agent-fields"><div class="agent-field"><label>元提示词</label><textarea placeholder="设定身份、风格和工作规则……"></textarea></div><div class="agent-field"><label>用户需求</label><textarea placeholder="输入任务，或通过连线、@ 引用图片……"></textarea></div><div class="agent-output"><label>输出内容</label><select><option>输出文字</option></select></div></div><button class="agent-run">运行 Agent</button></div><button class="plus">+</button>';world.appendChild(article);nodes.push(article);bindNode(article);bindAgentNode(article);selectNode(article);commitHistory({undo:()=>article.remove(),redo:()=>{world.appendChild(article);selectNode(article)}});return article}
   function createTextNode(kind='text',x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom,value='',record=true){const n=document.createElement('article');n.className='node '+(kind==='note'?'note-node':'text-node');n.id=kind+'-'+Date.now()+'-'+Math.random().toString(16).slice(2);n.style.left=x+'px';n.style.top=y+'px';n.innerHTML='<div class="node-label">'+(kind==='note'?'▤　便签':'T　文字')+'</div><div class="card text-card"><textarea placeholder="'+(kind==='note'?'记录想法……':'输入或粘贴文字')+'"></textarea></div><button class="plus">+</button>';n.querySelector('textarea').value=value;world.appendChild(n);nodes.push(n);bindNode(n);n.querySelector('textarea').oninput=scheduleSave;selectNode(n);if(record)commitHistory({undo:()=>n.remove(),redo:()=>world.appendChild(n)});return n}
   function createGroupNode(x=(canvas.clientWidth/2-panX)/zoom,y=(canvas.clientHeight/2-panY)/zoom,width=560,height=390){const n=document.createElement('article');n.className='node group-node';n.id='group-'+Date.now();n.style.left=x+'px';n.style.top=y+'px';n.innerHTML='<div class="node-label">⌗　节点组</div><div class="card group-card"></div><button class="plus">+</button>';const card=n.querySelector('.group-card');card.style.width=width+'px';card.style.height=height+'px';world.appendChild(n);nodes.unshift(n);bindNode(n);selectNode(n);commitHistory({undo:()=>n.remove(),redo:()=>world.appendChild(n)});return n}
   function bindCompareNode(n){const slider=n.querySelector('.compare-slider');if(slider)slider.oninput=()=>{const value=slider.value;n.querySelector('.compare-top').style.clipPath=`inset(0 ${100-value}% 0 0)`;n.querySelector('.compare-divider').style.left=value+'%'}}
@@ -3386,7 +3386,7 @@ splitGrid=async function(n){
 <script>
 /* REAL_AGENT_BACKEND_V1 */
 (function(){
-  const AGENT_MODELS=['GPT 5.5 Vision · 省积分','GPT 5.5 Vision · 高质量','Gemini 3.1 Flash Lite · 省积分','Gemini 3 Flash · 标准'];
+  const AGENT_MODELS=['GPT 5.5','GPT 5.6 Luna','Gemini 3.5 Flash','Gemini 3.1 Pro Preview'];
   const controllers=new Map();
   const activeAgentTasks=new Set();
   const sharedConcurrency=window.KAI_TASK_CONCURRENCY||(window.KAI_TASK_CONCURRENCY={active:new Set(),max:10});
@@ -3421,7 +3421,7 @@ splitGrid=async function(n){
     const select=node?.querySelector('.agent-model');if(!select)return;
     const prior=select.value;
     select.replaceChildren(...AGENT_MODELS.map(name=>new Option(name,name)));
-    select.value=AGENT_MODELS.includes(prior)?prior:'GPT 5.5 Vision · 省积分';
+    select.value=AGENT_MODELS.includes(prior)?prior:'GPT 5.6 Luna';
   }
   document.querySelectorAll('.agent-node').forEach(syncAgentModels);
   setTimeout(()=>document.querySelectorAll('.agent-node').forEach(syncAgentModels),500);
@@ -3527,7 +3527,7 @@ splitGrid=async function(n){
         method:'POST',controller,timeoutMs:210000,
         headers:{'Idempotency-Key':task.billingRequestId},
         body:{
-          model:node.querySelector('.agent-model')?.value||'GPT 5.5 Vision · 省积分',
+          model:node.querySelector('.agent-model')?.value||'GPT 5.6 Luna',
           metaPrompt:fields[0]?.value.trim()||'',userNeed:fields[1]?.value.trim()||'',
           skillName:skill.name,skillContent:skill.content,
           contextTexts:payload.texts.map(x=>({label:x.label,value:x.value})),
@@ -3602,7 +3602,7 @@ splitGrid=async function(n){
   queueNodeExecution=function(node,options={}){
     if(node?.classList.contains('agent-node')){
       syncAgentModels(node);
-      const model=node.querySelector('.agent-model')?.value||'GPT 5.5 Vision · 省积分';
+      const model=node.querySelector('.agent-model')?.value||'GPT 5.6 Luna';
       const result=previousQueueNodeExecution(node,{...(options||{}),lockedModel:model});
       const task=[...workflowQueue].reverse().find(item=>item.nodeId===node.id&&item.status==='pending');
       if(task){task.model=model;task.sizeLabel=node.querySelector('.agent-skill')?.value||'无 Skill';renderTaskQueue()}
