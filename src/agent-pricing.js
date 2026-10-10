@@ -2,12 +2,13 @@
 const POINT_VALUE_RMB = 0.1;
 const SALE_MULTIPLIER = Number(process.env.AGENT_SALE_MULTIPLIER || 2);
 
-// OtterL 公开价格，单位为人民币 / 1M tokens。面向用户的售价乘 2。
+// Rivo 当前所选 GPT 标准 / Gemini 标准分组价格，单位为人民币 / 1M tokens。
+// 面向用户的售价乘 2；缓存命中按上游缓存价计算，避免按普通输入价多收。
 const PROFILES = {
-  'GPT 5.5 Vision · 省积分': { reference: 'gpt-5.5', inputRmbPerMillion: 1.5, outputRmbPerMillion: 9 },
-  'GPT 5.5 Vision · 高质量': { reference: 'gpt-5.5', inputRmbPerMillion: 1.5, outputRmbPerMillion: 9 },
-  'Gemini 3.1 Flash Lite · 省积分': { reference: 'gemini-3.1-flash-lite', inputRmbPerMillion: 0.1, outputRmbPerMillion: 0.6 },
-  'Gemini 3 Flash · 标准': { reference: 'gemini-3-flash', inputRmbPerMillion: 0.2, outputRmbPerMillion: 1.2 },
+  'GPT 5.5': { reference: 'gpt-5.5', inputRmbPerMillion: 0.65, cachedInputRmbPerMillion: 0.065, outputRmbPerMillion: 3.9 },
+  'GPT 5.6 Luna': { reference: 'gpt-5.6-luna', inputRmbPerMillion: 0.026, cachedInputRmbPerMillion: 0.0026, outputRmbPerMillion: 0.156 },
+  'Gemini 3.5 Flash': { reference: 'gemini-3.5-flash', inputRmbPerMillion: 0.75, cachedInputRmbPerMillion: 0.075, outputRmbPerMillion: 4.5 },
+  'Gemini 3.1 Pro Preview': { reference: 'gemini-3.1-pro-preview', inputRmbPerMillion: 1, cachedInputRmbPerMillion: 0.1, outputRmbPerMillion: 6 },
 };
 
 function profile(model) {
@@ -28,17 +29,26 @@ function normalizeUsage(usage = {}) {
   const outputTokens = Number(
     usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usage.completionTokens ?? 0,
   ) || 0;
-  return { inputTokens: Math.max(0, inputTokens), outputTokens: Math.max(0, outputTokens) };
+  const cachedInputTokens = Number(
+    usage.cached_input_tokens ?? usage.cachedInputTokens
+    ?? usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0,
+  ) || 0;
+  return {
+    inputTokens: Math.max(0, inputTokens),
+    cachedInputTokens: Math.max(0, Math.min(inputTokens, cachedInputTokens)),
+    outputTokens: Math.max(0, outputTokens),
+  };
 }
 
 function quoteFromUsage(model, usage, options = {}) {
   const rates = profile(model);
   const normalized = normalizeUsage(usage);
-  const fallback = options.fallbackUsage || { inputTokens: 2000, outputTokens: 1000 };
+  const fallback = options.fallbackUsage || { inputTokens: 2000, cachedInputTokens: 0, outputTokens: 1000 };
   const hasUsage = normalized.inputTokens > 0 || normalized.outputTokens > 0;
   const used = hasUsage ? normalized : fallback;
   const providerRmb = (
-    used.inputTokens * rates.inputRmbPerMillion
+    (used.inputTokens - (used.cachedInputTokens || 0)) * rates.inputRmbPerMillion
+    + (used.cachedInputTokens || 0) * rates.cachedInputRmbPerMillion
     + used.outputTokens * rates.outputRmbPerMillion
   ) / 1_000_000;
   const userRmbRaw = providerRmb * SALE_MULTIPLIER;
@@ -49,8 +59,10 @@ function quoteFromUsage(model, usage, options = {}) {
     estimated: !hasUsage,
     referenceModel: rates.reference,
     inputTokens: used.inputTokens,
+    cachedInputTokens: used.cachedInputTokens || 0,
     outputTokens: used.outputTokens,
     inputRmbPerMillion: rates.inputRmbPerMillion,
+    cachedInputRmbPerMillion: rates.cachedInputRmbPerMillion,
     outputRmbPerMillion: rates.outputRmbPerMillion,
     providerRmb: Number(providerRmb.toFixed(6)),
     multiplier: SALE_MULTIPLIER,
@@ -64,7 +76,7 @@ function quoteFromUsage(model, usage, options = {}) {
 }
 
 function estimate(model) {
-  return quoteFromUsage(model, null, { fallbackUsage: { inputTokens: 2000, outputTokens: 1000 } });
+  return quoteFromUsage(model, null, { fallbackUsage: { inputTokens: 2000, cachedInputTokens: 0, outputTokens: 1000 } });
 }
 
 module.exports = { PROFILES, profile, normalizeUsage, quoteFromUsage, estimate };

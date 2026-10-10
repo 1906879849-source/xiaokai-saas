@@ -25,10 +25,10 @@ function intEnv(name, fallback) {
 const POINT_VALUE_RMB = 0.1;
 
 const PRICES = {
-  'Agent · GPT 5.5 Vision · 省积分': { default: agentPricing.estimate('GPT 5.5 Vision · 省积分').total },
-  'Agent · GPT 5.5 Vision · 高质量': { default: agentPricing.estimate('GPT 5.5 Vision · 高质量').total },
-  'Agent · Gemini 3.1 Flash Lite · 省积分': { default: agentPricing.estimate('Gemini 3.1 Flash Lite · 省积分').total },
-  'Agent · Gemini 3 Flash · 标准': { default: agentPricing.estimate('Gemini 3 Flash · 标准').total },
+  'Agent · GPT 5.5': { default: agentPricing.estimate('GPT 5.5').total },
+  'Agent · GPT 5.6 Luna': { default: agentPricing.estimate('GPT 5.6 Luna').total },
+  'Agent · Gemini 3.5 Flash': { default: agentPricing.estimate('Gemini 3.5 Flash').total },
+  'Agent · Gemini 3.1 Pro Preview': { default: agentPricing.estimate('Gemini 3.1 Pro Preview').total },
   'Nano Banana 2': { '1K': 3, '2K': 4, '4K': 5, default: 3 },
   'Nano Banana Pro': { '1K': 3, '2K': 5, '4K': 6, default: 3 },
   'GPT Image 2': { '1K': 2, '2K': 3, '4K': 5, default: 2 },
