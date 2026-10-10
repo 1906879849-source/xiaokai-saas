@@ -637,6 +637,13 @@ app.post('/api/image/generate', async (req, res) => {
     }
     const selectedProvider = selectImageProvider(modelName, model);
     const provider = selectedProvider.client;
+    // 只记录路由和任务数量，不记录 prompt、图片内容或密钥，便于在 Railway
+    // 日志中判断请求究竟有没有进入后端及 Rivo 提交流程。
+    console.info('[image submit]', JSON.stringify({
+      userId: req.user?.id || '', requestId: requestId || '', model: modelName,
+      provider: selectedProvider.name, resolution: requestedResolution, count,
+      references: rawImages.length, at: new Date().toISOString(),
+    }));
     // Mock 完全离线；OtterL 的编辑接口直接接收原图；只有 KIE 需要先转为公网 URL。
     const imageUrls = selectedProvider.name === 'kie' ? await kie.prepareImageUrls(rawImages) : rawImages;
     const callbackUrl = (process.env.PUBLIC_BASE_URL || '').trim()
@@ -673,6 +680,10 @@ app.post('/api/image/generate', async (req, res) => {
     }
 
     wallet.attachTasks(reservationId, tasks.map(task => ({ taskId: task.taskId, taskApi: task.taskApi, model: modelName })));
+    console.info('[image accepted]', JSON.stringify({
+      userId: req.user?.id || '', requestId: requestId || '', provider: selectedProvider.name,
+      accepted: tasks.length, failed: createdResults.length - tasks.length, at: new Date().toISOString(),
+    }));
     if (!tasks.length && createError) throw createError;
     if (createError) warnings.add(`部分任务未提交：${createError.message}`);
 
