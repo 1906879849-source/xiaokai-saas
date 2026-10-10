@@ -958,6 +958,17 @@ app.get('/api/tasks/recent', (req, res) => {
   res.json({ ok: true, tasks });
 });
 
+app.get('/api/tasks/by-request/:requestId', (req, res) => {
+  const requestId = String(req.params.requestId || '').trim();
+  if (!requestId || requestId.length > 160) return res.status(400).json({ ok: false, error: '生成请求 ID 无效' });
+  const base = `${req.protocol}://${req.get('host')}`;
+  const tasks = wallet.tasksByRequest(requestId).map(item => ({
+    ...item,
+    resultUrls: (Array.isArray(item.resultUrls) ? item.resultUrls : []).map(url => String(url).startsWith('/') ? `${base}${url}` : url),
+  }));
+  res.json({ ok: true, requestId, tasks });
+});
+
 let reconcilingWallet = false;
 const taskFreezeTimeoutMinutes = Math.max(1, Math.min(1440, Number(process.env.TASK_FREEZE_TIMEOUT_MINUTES) || 20));
 const taskFreezeTimeoutMs = taskFreezeTimeoutMinutes * 60 * 1000;
