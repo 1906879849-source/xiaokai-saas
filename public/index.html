@@ -2800,6 +2800,11 @@ splitGrid=async function(n){
   processWorkflowQueue=async function(){
     const activeTask=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
     if(workflowActiveTask&&!activeTask)workflowActiveTask=null;
+    const liveGenerationIds=new Set(workflowQueue.filter(task=>task.status==='running'&&task.type==='generation').map(task=>task.id));
+    for(const id of [...activeGenerationTasks])if(!liveGenerationIds.has(id))activeGenerationTasks.delete(id);
+    for(const id of [...sharedConcurrency.active]){
+      if(!workflowQueue.some(task=>task.id===id&&task.status==='running'))sharedConcurrency.active.delete(id);
+    }
     const pendingFirst=workflowQueue.find(task=>task.status==='pending');
     if(!pendingFirst)return;
     // Agent tasks keep their own single-flight lock. Independent image nodes can
@@ -3606,17 +3611,39 @@ splitGrid=async function(n){
       const result=previousQueueNodeExecution(node,{...(options||{}),lockedModel:model});
       const task=[...workflowQueue].reverse().find(item=>item.nodeId===node.id&&item.status==='pending');
       if(task){task.model=model;task.sizeLabel=node.querySelector('.agent-skill')?.value||'无 Skill';renderTaskQueue()}
+      // Older queue wrappers can return before the newest dispatcher sees the task.
+      // Kick the dispatcher again after every wrapper has completed.
+      queueMicrotask(()=>processWorkflowQueue());
+      setTimeout(()=>processWorkflowQueue(),80);
       return result;
     }
-    return previousQueueNodeExecution(node,options);
+    const result=previousQueueNodeExecution(node,options);
+    queueMicrotask(()=>processWorkflowQueue());
+    setTimeout(()=>processWorkflowQueue(),80);
+    return result;
   };
 
   const previousProcessWorkflowQueue=processWorkflowQueue;
   processWorkflowQueue=async function(){
     const pendingFirst=workflowQueue.find(task=>task.status==='pending');
     if(!pendingFirst)return;
+    // Only tasks that are visibly running may occupy a concurrency slot. This
+    // removes orphaned ids left by cancellation, a failed legacy wrapper, or a
+    // hot-reloaded page, which previously left new tasks stuck at “排队中”.
+    const liveRunningIds=new Set(workflowQueue.filter(task=>task.status==='running').map(task=>task.id));
+    for(const id of [...sharedConcurrency.active])if(!liveRunningIds.has(id))sharedConcurrency.active.delete(id);
     if(sharedConcurrency.active.size>=sharedConcurrency.max)return;
-    if(pendingFirst.type!=='agent')return previousProcessWorkflowQueue();
+    if(pendingFirst.type!=='agent'){
+      try{return await previousProcessWorkflowQueue()}
+      catch(error){
+        const node=document.getElementById(pendingFirst.nodeId);
+        pendingFirst.status='error';pendingFirst.phase='failed';pendingFirst.errorReason=error?.message||'任务调度失败';pendingFirst.note=pendingFirst.errorReason;pendingFirst.finishedAt=Date.now();
+        if(node){showGenerationFailure(node,pendingFirst,pendingFirst.errorReason,'uploading');setNodeStatus(node,'error','调度失败')}
+        renderTaskQueue();scheduleSave();note('任务调度失败：'+pendingFirst.errorReason);
+        setTimeout(processWorkflowQueue,80);
+        return;
+      }
+    }
     const hasOrderedRun=workflowQueue.some(task=>task.status==='running'&&task.workflowRunId);
     const next=pendingFirst;
     if(workflowQueue.some(active=>active.status==='running'&&active.nodeId===next.nodeId))return;
@@ -3632,6 +3659,17 @@ splitGrid=async function(n){
 
   const previousCancelWorkflowTask=cancelWorkflowTask;
   cancelWorkflowTask=function(taskId,quiet=false){controllers.get(taskId)?.abort();return previousCancelWorkflowTask(taskId,quiet)};
+
+  // Permanent queue heartbeat: pending work must never depend on a stale legacy
+  // workflowActiveTask lock. The real concurrency set still caps total work at 10.
+  if(!window.__kaiReliableQueueHeartbeat){
+    window.__kaiReliableQueueHeartbeat=setInterval(()=>{
+      if(!workflowQueue.some(task=>task.status==='pending'))return;
+      const liveRunningIds=new Set(workflowQueue.filter(task=>task.status==='running').map(task=>task.id));
+      for(const id of [...sharedConcurrency.active])if(!liveRunningIds.has(id))sharedConcurrency.active.delete(id);
+      processWorkflowQueue();
+    },500);
+  }
 })();
 </script>
 <script>
