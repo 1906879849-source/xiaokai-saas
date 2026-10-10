@@ -2807,40 +2807,51 @@ splitGrid=async function(n){
   const MAX_PARALLEL_GENERATIONS=10;
   const sharedConcurrency=window.KAI_TASK_CONCURRENCY||(window.KAI_TASK_CONCURRENCY={active:new Set(),max:10});
   sharedConcurrency.max=10;
-  processWorkflowQueue=async function(){
-    const activeTask=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
-    if(workflowActiveTask&&!activeTask)workflowActiveTask=null;
+  function cleanupGenerationSlots(){
     const liveGenerationIds=new Set(workflowQueue.filter(task=>task.status==='running'&&task.type==='generation').map(task=>task.id));
     for(const id of [...activeGenerationTasks])if(!liveGenerationIds.has(id))activeGenerationTasks.delete(id);
     for(const id of [...sharedConcurrency.active]){
       if(!workflowQueue.some(task=>task.id===id&&task.status==='running'))sharedConcurrency.active.delete(id);
     }
-    const pendingFirst=workflowQueue.find(task=>task.status==='pending');
-    if(!pendingFirst)return;
-    // Agent tasks keep their own single-flight lock. Independent image nodes can
-    // run together, while a whole connected workflow remains ordered.
-    if(pendingFirst.type!=='generation'&&!workflowActiveTask)return _legacyProcessWorkflowQueueV1();
-    if(activeGenerationTasks.size>=MAX_PARALLEL_GENERATIONS||sharedConcurrency.active.size>=sharedConcurrency.max)return;
+  }
+  function dispatchPendingGeneration(){
+    cleanupGenerationSlots();
+    if(activeGenerationTasks.size>=MAX_PARALLEL_GENERATIONS||sharedConcurrency.active.size>=sharedConcurrency.max)return false;
     const hasOrderedRun=workflowQueue.some(task=>task.status==='running'&&task.workflowRunId);
     const next=workflowQueue.find(task=>task.status==='pending'&&task.type==='generation'
       &&!workflowQueue.some(active=>active.status==='running'&&active.nodeId===task.nodeId)
       &&(!task.workflowRunId||(!hasOrderedRun&&workflowQueue.find(item=>item.status==='pending'&&item.workflowRunId===task.workflowRunId)===task)));
-    if(!next)return;
+    if(!next)return false;
     const node=document.getElementById(next.nodeId);
-    if(!node){next.status='error';next.phase='failed';next.note='节点不存在';next.finishedAt=Date.now();renderTaskQueue();setTimeout(processWorkflowQueue,50);return}
+    if(!node){next.status='error';next.phase='failed';next.note='节点不存在';next.finishedAt=Date.now();renderTaskQueue();setTimeout(dispatchPendingGeneration,50);return true}
     if(!isRealModel(next.model)){
       next.status='error';next.phase='failed';next.note='当前模型没有可用的图片接口';next.errorReason=next.note;next.finishedAt=Date.now();
       showGenerationFailure(node,next,next.errorReason,'uploading');
-      setNodeStatus(node,'error','模型未接入');renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,50);return;
+      setNodeStatus(node,'error','模型未接入');renderTaskQueue();scheduleSave();setTimeout(dispatchPendingGeneration,50);return true;
     }
     enrichTask(next,node);
     activeGenerationTasks.add(next.id);
     sharedConcurrency.active.add(next.id);
     next.status='running';next.phase='uploading';next.startedAt=next.startedAt||Date.now();
-    runRealGeneration(next,node).finally(()=>{
-      activeGenerationTasks.delete(next.id);sharedConcurrency.active.delete(next.id);renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,100)
+    renderTaskQueue();scheduleSave();
+    Promise.resolve().then(()=>runRealGeneration(next,node)).catch(error=>{
+      if(['done','error','canceled','detached'].includes(next.status))return;
+      next.status='error';next.phase='failed';next.errorReason=error?.message||'图片任务启动失败';next.note=next.errorReason;next.finishedAt=Date.now();
+      showGenerationFailure(node,next,next.errorReason,'uploading');setNodeStatus(node,'error','启动失败');note('图片任务启动失败：'+next.errorReason);
+    }).finally(()=>{
+      activeGenerationTasks.delete(next.id);sharedConcurrency.active.delete(next.id);renderTaskQueue();scheduleSave();setTimeout(dispatchPendingGeneration,100)
     });
-    setTimeout(processWorkflowQueue,0);
+    setTimeout(dispatchPendingGeneration,0);
+    return true;
+  }
+  processWorkflowQueue=async function(){
+    const activeTask=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
+    if(workflowActiveTask&&!activeTask)workflowActiveTask=null;
+    if(dispatchPendingGeneration())return;
+    const pendingFirst=workflowQueue.find(task=>task.status==='pending');
+    if(!pendingFirst)return;
+    // Non-image legacy workflow tasks keep their original ordered dispatcher.
+    if(pendingFirst.type!=='generation'&&!workflowActiveTask)return _legacyProcessWorkflowQueueV1();
   };
   // Recover automatically if an older build, refresh, or aborted request left only a
   // stale runtime lock while visible tasks are still waiting.
@@ -2859,7 +2870,7 @@ splitGrid=async function(n){
     }).catch(()=>{});
   });
   // Expose the two task helpers while they are still inside their defining scope.
-  window.KAI_IMAGE_RUNTIME={pollProviderTasks,applyRealResults,confirmTemporaryDeliveries,showGenerationFailure,clearGenerationFailure};
+  window.KAI_IMAGE_RUNTIME={pollProviderTasks,applyRealResults,confirmTemporaryDeliveries,showGenerationFailure,clearGenerationFailure,dispatchPendingGeneration};
 })();
 
 
@@ -3656,6 +3667,7 @@ splitGrid=async function(n){
       return result;
     }
     const result=previousQueueNodeExecution(node,options);
+    window.KAI_IMAGE_RUNTIME?.dispatchPendingGeneration?.();
     queueMicrotask(()=>processWorkflowQueue());
     setTimeout(()=>processWorkflowQueue(),80);
     return result;
@@ -3672,6 +3684,7 @@ splitGrid=async function(n){
     for(const id of [...sharedConcurrency.active])if(!liveRunningIds.has(id))sharedConcurrency.active.delete(id);
     if(sharedConcurrency.active.size>=sharedConcurrency.max)return;
     if(pendingFirst.type!=='agent'){
+      if(window.KAI_IMAGE_RUNTIME?.dispatchPendingGeneration?.())return;
       try{return await previousProcessWorkflowQueue()}
       catch(error){
         const node=document.getElementById(pendingFirst.nodeId);
@@ -3705,6 +3718,7 @@ splitGrid=async function(n){
       if(!workflowQueue.some(task=>task.status==='pending'))return;
       const liveRunningIds=new Set(workflowQueue.filter(task=>task.status==='running').map(task=>task.id));
       for(const id of [...sharedConcurrency.active])if(!liveRunningIds.has(id))sharedConcurrency.active.delete(id);
+      window.KAI_IMAGE_RUNTIME?.dispatchPendingGeneration?.();
       processWorkflowQueue();
     },500);
   }
