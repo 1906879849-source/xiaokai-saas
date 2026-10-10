@@ -2146,6 +2146,8 @@ splitGrid=async function(n){
     if(!node?.isConnected)return note('请先选择一个可运行节点');
     const type=node.classList.contains('agent-node')?'agent':node.classList.contains('generation-node')?'generation':null;
     if(!type)return note('当前节点暂不支持运行');
+    const unfinished=workflowQueue.find(task=>task.nodeId===node.id&&['pending','running','detached'].includes(task.status));
+    if(unfinished)return note(unfinished.status==='detached'?'这个节点仍有后台任务待确认，请先点击“找回结果”':'这个节点已有未完成任务，请等待完成或先停止等待');
     if(type==='generation'&&options.lockedPromptText==null&&options.lockedPromptHtml==null)syncPromptToSelectedNode();
     if(isRatioResizableNode?.(node)&&!node.dataset.sizeState){try{node.dataset.sizeState=JSON.stringify(captureSizeState())}catch{}}
     if(!node.dataset.modelName)node.dataset.modelName=currentModelName();
@@ -2153,7 +2155,7 @@ splitGrid=async function(n){
     const state=safeSizeState(sizeState);
     const task={
       id:'task-'+(++workflowTaskId),nodeId:node.id,name:strippedNodeName(node),type,status:'pending',phase:'waiting',note:'等待执行',
-      retryOf:options.retryOf||'',sourceTaskId:options.sourceTaskId||'',createdAt:Date.now(),
+      retryOf:options.retryOf||'',sourceTaskId:options.sourceTaskId||'',workflowRunId:options.workflowRunId||'',createdAt:Date.now(),
       model:options.lockedModel||node.dataset.modelName||currentModelName(),
       sizeState,
       sizeLabel:state?.title||state?.text||currentSizeSummary()
@@ -2465,6 +2467,35 @@ splitGrid=async function(n){
       if(signal)signal.addEventListener('abort',()=>{clearTimeout(id);reject(new DOMException('Aborted','AbortError'))},{once:true});
     });
   }
+  async function lookupSubmittedTasks(requestId,{attempts=4}={}){
+    let lastError=null,contacted=false;
+    for(let attempt=0;attempt<attempts;attempt+=1){
+      try{
+        const data=await apiFetch('/api/tasks/by-request/'+encodeURIComponent(requestId),{timeoutMs:12000});
+        contacted=true;
+        const tasks=(Array.isArray(data.tasks)?data.tasks:[]).filter(item=>item?.taskId).map(item=>({
+          taskId:item.taskId,
+          taskApi:item.taskApi||'market',
+          providerModel:item.providerModel||item.model||''
+        }));
+        if(tasks.length)return{tasks,contacted:true,lastError:null};
+      }catch(error){lastError=error}
+      if(attempt<attempts-1)await delay(500*(attempt+1));
+    }
+    return{tasks:[],contacted,lastError};
+  }
+  function rememberProviderTasks(node,task,providerTasks,resolvedPrompt=''){
+    task.providerTasks=providerTasks;
+    task.providerTaskIds=providerTasks.map(item=>item.taskId).filter(Boolean);
+    node.dataset.providerTasks=JSON.stringify(providerTasks);
+    node.dataset.providerPrompt=resolvedPrompt||task.resolvedPrompt||node.dataset.promptText||'';
+    node.dataset.providerModel=task.model||'';
+    node.dataset.providerSizeState=task.sizeState||'';
+    node.dataset.providerSubmittedAt=String(task.submissionStartedAt||Date.now());
+    node.dataset.providerRequestId=task.billingRequestId||'';
+    node.dataset.providerRecoveryState='pending';
+    scheduleSave();
+  }
   function resolvedPromptFor(node,task){
     const payload=collectInputPayload(node);
     const base=(task.promptText!=null?task.promptText:(node.dataset.promptText||promptBox.value||'')).trim();
@@ -2627,6 +2658,14 @@ splitGrid=async function(n){
       task.resolvedPrompt=resolved;
       task.billingRequestId=task.billingRequestId||(globalThis.crypto?.randomUUID?.()||('bill-'+Date.now()+'-'+Math.random().toString(16).slice(2)));
       task.submissionStartedAt=Date.now();
+      node.dataset.providerRequestId=task.billingRequestId;
+      node.dataset.providerPrompt=resolved;
+      node.dataset.providerModel=task.model||'';
+      node.dataset.providerSizeState=task.sizeState||'';
+      node.dataset.providerSubmittedAt=String(task.submissionStartedAt);
+      node.dataset.providerRecoveryState='submitting';
+      scheduleSave();
+      try{await saveProject()}catch{}
       const created=await apiFetch('/api/image/generate',{
         method:'POST',controller,timeoutMs:120000,
         headers:{'Idempotency-Key':task.billingRequestId},
@@ -2641,15 +2680,7 @@ splitGrid=async function(n){
       });
       window.KAI_WALLET?.apply(created.wallet);
       task.provider=created.provider||'kie';
-      task.providerTasks=created.tasks||[];
-      task.providerTaskIds=task.providerTasks.map(x=>x.taskId);
-      node.dataset.providerTasks=JSON.stringify(task.providerTasks);
-      node.dataset.providerPrompt=resolved;
-      node.dataset.providerModel=task.model||'';
-      node.dataset.providerSizeState=task.sizeState||'';
-      node.dataset.providerSubmittedAt=String(Date.now());
-      node.dataset.providerRecoveryState='pending';
-      scheduleSave();
+      rememberProviderTasks(node,task,created.tasks||[],resolved);
       try{await saveProject()}catch{}
       task.apiWarnings=created.warnings||[];
       if(!created.tasks?.length)throw new Error('图片生成服务没有返回任务 ID');
@@ -2687,6 +2718,45 @@ splitGrid=async function(n){
         task.status='done';task.phase='success';task.note='生成成功（已自动找回）';task.errorReason='';
         task.finishedAt=Date.now();task.durationMs=task.finishedAt-(task.startedAt||started);
         clearGenerationFailure(node);setNodeStatus(node,'done','已恢复');return;
+      }
+      // The POST may have reached Railway/OtterL even when the browser loses the
+      // response. Reconcile by the idempotency request ID before declaring a
+      // failure; otherwise clicking retry creates a second paid upstream task.
+      if(task.billingRequestId&&!task.providerTaskIds?.length){
+        const lookup=await lookupSubmittedTasks(task.billingRequestId);
+        if(lookup.tasks.length){
+          rememberProviderTasks(node,task,lookup.tasks,task.resolvedPrompt||'');
+          task.provider=lookup.tasks.some(item=>item.taskApi==='otterl')?'otterl':lookup.tasks.some(item=>item.taskApi==='mock')?'mock':'kie';
+          task.status='running';task.phase='generating';task.note='提交响应中断，已按请求 ID 找回原任务；请勿重复提交';
+          setNodeStatus(node,'running','恢复原任务');renderTaskQueue();
+          try{await saveProject()}catch{}
+          const recoveryController=new AbortController();
+          realAbortControllers.set(task.id,recoveryController);
+          try{
+            const recovered=await pollProviderTasks(lookup.tasks,task,node,recoveryController);
+            if(recovered.successes.length){
+              applyRealResults(node,recovered.urls,task.resolvedPrompt||node.dataset.providerPrompt||'',task);
+              let delivery={confirmedCount:0,warnings:[]};
+              try{delivery=await confirmTemporaryDeliveries(lookup.tasks,recovered.successes)}catch(deliveryError){delivery.warnings.push('图片已生成；交付状态确认暂时异常：'+(deliveryError?.message||'未知错误'))}
+              node.dataset.providerRecoveryState='done';
+              task.status='done';task.phase=delivery.warnings.length?'warning':'success';task.note='已找回原任务结果，没有重复提交';
+              task.errorReason='';task.finishedAt=Date.now();task.durationMs=task.finishedAt-(task.startedAt||started);
+              clearGenerationFailure(node);setNodeStatus(node,'done',delivery.warnings.length?'已完成·规格提示':'已完成');
+              note('已找回原任务结果，没有再次提交或重复扣费');
+              return;
+            }
+            error=new Error(recovered.failures.map(item=>item.failMsg||item.failCode).filter(Boolean).join('；')||'图片生成失败');
+          }catch(recoveryError){error=recoveryError}
+        }else if(!lookup.contacted){
+          task.status='detached';task.phase='background';task.note='网络中断，后台状态待确认；请勿重复提交，稍后点击“找回结果”';
+          task.finishedAt=Date.now();task.durationMs=task.finishedAt-(task.startedAt||started);
+          node.dataset.providerRecoveryState='pending';
+          setNodeStatus(node,'pending','待确认');renderTaskQueue();scheduleSave();
+          note('网络中断，后台是否已接单暂时无法确认；请勿重复提交，稍后点击“找回结果”');
+          return;
+        }else{
+          error=new Error('后台未发现已提交任务，本次没有产生有效生成任务');
+        }
       }
       const failedPhase=task.phase;
       const timeoutReason=error?.name==='AbortError'
@@ -2727,27 +2797,39 @@ splitGrid=async function(n){
     setTimeout(processWorkflowQueue,30);
     return true;
   };
+  const activeGenerationTasks=new Set();
+  const MAX_PARALLEL_GENERATIONS=10;
+  const sharedConcurrency=window.KAI_TASK_CONCURRENCY||(window.KAI_TASK_CONCURRENCY={active:new Set(),max:10});
+  sharedConcurrency.max=10;
   processWorkflowQueue=async function(){
     const activeTask=workflowQueue.find(task=>task.id===workflowActiveTask&&task.status==='running');
     if(workflowActiveTask&&!activeTask)workflowActiveTask=null;
-    const activeGeneration=workflowQueue.some(task=>task.status==='running'&&task.type==='generation');
-    if(realQueueBusy&&!activeGeneration)realQueueBusy=false;
-    if(realQueueBusy||workflowActiveTask)return;
-    const next=workflowQueue.find(t=>t.status==='pending');
+    const pendingFirst=workflowQueue.find(task=>task.status==='pending');
+    if(!pendingFirst)return;
+    // Agent tasks keep their own single-flight lock. Independent image nodes can
+    // run together, while a whole connected workflow remains ordered.
+    if(pendingFirst.type!=='generation'&&!workflowActiveTask)return _legacyProcessWorkflowQueueV1();
+    if(activeGenerationTasks.size>=MAX_PARALLEL_GENERATIONS||sharedConcurrency.active.size>=sharedConcurrency.max)return;
+    const hasOrderedRun=workflowQueue.some(task=>task.status==='running'&&task.workflowRunId);
+    const next=workflowQueue.find(task=>task.status==='pending'&&task.type==='generation'
+      &&!workflowQueue.some(active=>active.status==='running'&&active.nodeId===task.nodeId)
+      &&(!task.workflowRunId||(!hasOrderedRun&&workflowQueue.find(item=>item.status==='pending'&&item.workflowRunId===task.workflowRunId)===task)));
     if(!next)return;
     const node=document.getElementById(next.nodeId);
     if(!node){next.status='error';next.phase='failed';next.note='节点不存在';next.finishedAt=Date.now();renderTaskQueue();setTimeout(processWorkflowQueue,50);return}
-    // Agent is handled by its authenticated backend wrapper below.
-    if(next.type!=='generation')return _legacyProcessWorkflowQueueV1();
     if(!isRealModel(next.model)){
       next.status='error';next.phase='failed';next.note='当前模型没有可用的图片接口';next.errorReason=next.note;next.finishedAt=Date.now();
       showGenerationFailure(node,next,next.errorReason,'uploading');
       setNodeStatus(node,'error','模型未接入');renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,50);return;
     }
-    realQueueBusy=true;workflowActiveTask=next.id;
-    try{await runRealGeneration(next,node)}finally{
-      workflowActiveTask=null;realQueueBusy=false;renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,100)
-    }
+    enrichTask(next,node);
+    activeGenerationTasks.add(next.id);
+    sharedConcurrency.active.add(next.id);
+    next.status='running';next.phase='uploading';next.startedAt=next.startedAt||Date.now();
+    runRealGeneration(next,node).finally(()=>{
+      activeGenerationTasks.delete(next.id);sharedConcurrency.active.delete(next.id);renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,100)
+    });
+    setTimeout(processWorkflowQueue,0);
   };
   // Recover automatically if an older build, refresh, or aborted request left only a
   // stale runtime lock while visible tasks are still waiting.
@@ -3160,7 +3242,24 @@ splitGrid=async function(n){
     allGenerationNodes.forEach(node=>savedProviderTasks(node).forEach(x=>claimed.add(x.taskId)));
     const recoveries=[];
     for(const node of emptyNodes){
-      const tasks=savedProviderTasks(node);
+      let tasks=savedProviderTasks(node);
+      const requestId=node.dataset.providerRequestId||'';
+      if(!tasks.length&&requestId){
+        try{
+          const data=await apiFetch('/api/tasks/by-request/'+encodeURIComponent(requestId),{timeoutMs:10000});
+          tasks=(Array.isArray(data.tasks)?data.tasks:[]).filter(item=>item?.taskId).map(item=>({
+            taskId:item.taskId,taskApi:item.taskApi||'market',providerModel:item.providerModel||item.model||''
+          }));
+          if(tasks.length){
+            node.dataset.providerTasks=JSON.stringify(tasks);
+            node.dataset.providerSubmittedAt=String(data.tasks?.[0]?.createdAt||node.dataset.providerSubmittedAt||Date.now());
+            node.dataset.providerRecoveryState='pending';
+            tasks.forEach(item=>claimed.add(item.taskId));
+          }
+        }catch(error){
+          if(manual)console.warn('按请求 ID 查询图片任务失败',error);
+        }
+      }
       if(tasks.length)recoveries.push(recoverNode(node,tasks,{quiet:manual,force}));
     }
 
@@ -3293,7 +3392,9 @@ splitGrid=async function(n){
 (function(){
   const AGENT_MODELS=['GPT 5.5 Vision · 省积分','GPT 5.5 Vision · 高质量','Gemini 3.1 Flash Lite · 省积分','Gemini 3 Flash · 标准'];
   const controllers=new Map();
-  let agentBusy=false;
+  const activeAgentTasks=new Set();
+  const sharedConcurrency=window.KAI_TASK_CONCURRENCY||(window.KAI_TASK_CONCURRENCY={active:new Set(),max:10});
+  sharedConcurrency.max=10;
   const cancelBeforeAgentRuntime=cancelWorkflowTask;
 
   cancelWorkflowTask=function(taskId,quiet=false){
@@ -3516,14 +3617,21 @@ splitGrid=async function(n){
 
   const previousProcessWorkflowQueue=processWorkflowQueue;
   processWorkflowQueue=async function(){
-    if(agentBusy||workflowActiveTask)return;
-    const next=workflowQueue.find(task=>task.status==='pending');
-    if(!next)return;
-    if(next.type!=='agent')return previousProcessWorkflowQueue();
+    const pendingFirst=workflowQueue.find(task=>task.status==='pending');
+    if(!pendingFirst)return;
+    if(sharedConcurrency.active.size>=sharedConcurrency.max)return;
+    if(pendingFirst.type!=='agent')return previousProcessWorkflowQueue();
+    const hasOrderedRun=workflowQueue.some(task=>task.status==='running'&&task.workflowRunId);
+    const next=pendingFirst;
+    if(workflowQueue.some(active=>active.status==='running'&&active.nodeId===next.nodeId))return;
+    if(next.workflowRunId&&(hasOrderedRun||workflowQueue.find(item=>item.status==='pending'&&item.workflowRunId===next.workflowRunId)!==next))return;
     const node=document.getElementById(next.nodeId);
     if(!node){next.status='error';next.phase='failed';next.note='Agent 节点不存在';renderTaskQueue();return}
-    agentBusy=true;workflowActiveTask=next.id;
-    try{await runAgent(next,node)}finally{workflowActiveTask=null;agentBusy=false;renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,80)}
+    activeAgentTasks.add(next.id);sharedConcurrency.active.add(next.id);
+    setTimeout(processWorkflowQueue,0);
+    runAgent(next,node).finally(()=>{
+      activeAgentTasks.delete(next.id);sharedConcurrency.active.delete(next.id);renderTaskQueue();scheduleSave();setTimeout(processWorkflowQueue,80)
+    });
   };
 
   const previousCancelWorkflowTask=cancelWorkflowTask;
