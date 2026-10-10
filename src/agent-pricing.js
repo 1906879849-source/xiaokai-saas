@@ -1,4 +1,5 @@
-const POINT_VALUE_RMB = Number(process.env.KAI_POINT_VALUE_RMB || 0.01);
+// 与钱包保持同一固定汇率，避免旧 Railway 变量把 Agent 价格切回百积分制。
+const POINT_VALUE_RMB = 0.1;
 const SALE_MULTIPLIER = Number(process.env.AGENT_SALE_MULTIPLIER || 2);
 
 // OtterL 公开价格，单位为人民币 / 1M tokens。面向用户的售价乘 2。

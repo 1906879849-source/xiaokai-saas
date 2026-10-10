@@ -41,18 +41,16 @@
   // Keep the price visible before login as well. The server remains the source
   // of truth for billing; this is only a display fallback for the public canvas.
   const LOCAL_IMAGE_PRICES = {
-    'GPT Image 2': { '1K': 24, '2K': 24, standard: 24, high: 24, default: 24 },
-    'GPT Image 2 · 4K 超分': { default: 24 },
-    'GPT Image 2 · 原生 4K': { default: 40 },
-    'GPT Image 2.5 Flare': { '1K': 24, '2K': 24, standard: 24, high: 24, default: 24 },
-    'GPT Image 2.5 Sunburst': { '1K': 24, '2K': 24, standard: 24, high: 24, default: 24 },
-    'Gemini 3 Pro Image': { default: 80 },
-    'Gemini 3.1 Flash Image': { default: 60 },
+    'Nano Banana 2': { '1K': 3, '2K': 4, '4K': 5, default: 3 },
+    'Nano Banana Pro': { '1K': 3, '2K': 5, '4K': 6, default: 3 },
+    'GPT Image 2': { '1K': 2, '2K': 3, '4K': 5, default: 2 },
+    'GPT Image 2.5 Flare': { '1K': 3, default: 3 },
+    'GPT Image 2.5 Sunburst': { '1K': 4, default: 4 },
   };
   // 示例按输入 2,000 + 输出 1,000 tokens 估算；真正扣费按返回用量计算。
   const LOCAL_AGENT_ESTIMATES = {
-    'GPT 5.5 Vision · 省积分': 3,
-    'GPT 5.5 Vision · 高质量': 3,
+    'GPT 5.5 Vision · 省积分': 1,
+    'GPT 5.5 Vision · 高质量': 1,
     'Gemini 3.1 Flash Lite · 省积分': 1,
     'Gemini 3 Flash · 标准': 1,
   };
@@ -75,8 +73,8 @@
     <div class="wallet-head"><h2>KAI 积分</h2><button class="wallet-close">×</button></div>
     <div class="wallet-user"><span id="walletUser">未登录</span><span><a id="walletAdmin" href="/admin.html" target="_blank" hidden style="color:#8ebcff;margin-right:12px">管理员后台</a><button id="walletLogout">退出登录</button></span></div>
     <div class="wallet-balance"><strong id="walletAvailable">--</strong><small id="walletDetail">可用积分</small></div>
-    <div class="wallet-note">100 KAI 积分 = ¥1.00。任务会先冻结积分，成功后按实际用量扣除，失败自动返还。</div>
-    <h3>申请充值</h3><form class="recharge-box" id="rechargeForm"><div class="payment-qr"><img src="/payment/wechat-qr.png" alt="微信收款二维码"><b>① 微信扫码付款</b><small>收款人：kai（**凯）<br>¥1 = 100 积分</small></div><div class="payment-qr contact"><img src="/payment/wechat-contact-qr.png" alt="添加 kai 微信好友二维码"><b>② 添加客服微信</b><small>付款后添加好友<br>把付款信息发给我</small></div><div class="payment-reminder"><b>付款后请发送：</b>登录账号、付款金额、付款时间。这样可以更快核对到账，避免遗漏充值申请。</div><div class="arrival-note"><b>预计到账</b><span>当前为人工审核，通常 5–30 分钟到账。如超过 30 分钟仍未到账，请添加客服微信并发送订单号。</span></div><div class="package-grid"><button type="button" data-recharge-amount="10">¥10</button><button type="button" data-recharge-amount="30">¥30</button><button type="button" data-recharge-amount="50">¥50</button><button type="button" data-recharge-amount="100">¥100</button></div><input id="rechargeAmount" type="number" min="1" step="1" placeholder="充值金额（元）" required><select id="rechargeChannel"><option value="wechat">微信支付</option><option value="alipay" disabled>支付宝（尚未配置）</option></select><button class="wallet-action wide" type="submit">我已完成付款，提交审核</button></form>
+    <div class="wallet-note">10 KAI 积分 = ¥1.00。任务会先冻结积分，成功后按实际用量扣除，失败自动返还。</div>
+    <h3>申请充值</h3><form class="recharge-box" id="rechargeForm"><div class="payment-qr"><img src="/payment/wechat-qr.png" alt="微信收款二维码"><b>① 微信扫码付款</b><small>收款人：kai（**凯）<br>¥1 = 10 积分</small></div><div class="payment-qr contact"><img src="/payment/wechat-contact-qr.png" alt="添加 kai 微信好友二维码"><b>② 添加客服微信</b><small>付款后添加好友<br>把付款信息发给我</small></div><div class="payment-reminder"><b>付款后请发送：</b>登录账号、付款金额、付款时间。这样可以更快核对到账，避免遗漏充值申请。</div><div class="arrival-note"><b>预计到账</b><span>当前为人工审核，通常 5–30 分钟到账。如超过 30 分钟仍未到账，请添加客服微信并发送订单号。</span></div><div class="package-grid"><button type="button" data-recharge-amount="10">¥10</button><button type="button" data-recharge-amount="30">¥30</button><button type="button" data-recharge-amount="50">¥50</button><button type="button" data-recharge-amount="100">¥100</button></div><input id="rechargeAmount" type="number" min="1" step="1" placeholder="充值金额（元）" required><select id="rechargeChannel"><option value="wechat">微信支付</option><option value="alipay" disabled>支付宝（尚未配置）</option></select><button class="wallet-action wide" type="submit">我已完成付款，提交审核</button></form>
     <h3>充值记录</h3><div class="wallet-ledger" id="rechargeList"><div class="wallet-empty">暂无充值申请</div></div>
     <h3>模型价格</h3><div class="wallet-prices" id="walletPrices"></div>
     <h3>最近流水</h3><div class="wallet-ledger" id="walletLedger"><div class="wallet-empty">正在读取…</div></div>
@@ -95,7 +93,7 @@
     document.getElementById('walletBalance').textContent = currentUser ? `积分 ${next.available}` : '登录';
     document.getElementById('walletAvailable').textContent = next.available;
     document.getElementById('walletDetail').textContent = `总额 ${next.balance}　冻结 ${next.reserved}`;
-    button.classList.toggle('low', quote ? next.available < quote.total : next.available < 50);
+    button.classList.toggle('low', quote ? next.available < quote.total : next.available < 5);
     renderQuote();
   }
 
@@ -138,7 +136,7 @@
 
   function renderQuote() {
     if (!quote) { cost.textContent = '暂未定价'; cost.classList.remove('insufficient'); return; }
-    cost.textContent = `消耗 ${quote.total} 积分 · ¥${Number(quote.totalRmb || quote.total * 0.01).toFixed(2)}`;
+    cost.textContent = `消耗 ${quote.total} 积分 · ¥${Number(quote.totalRmb || quote.total * 0.1).toFixed(2)}`;
     const insufficient = wallet.available < quote.total;
     cost.classList.toggle('insufficient', insufficient);
     cost.title = insufficient ? `积分不足：需要 ${quote.total}，可用 ${wallet.available}` : `单张 ${quote.unit} 积分，共 ${quote.count} 张`;
@@ -155,8 +153,8 @@
       count,
       unit,
       total: unit * count,
-      unitRmb: unit * 0.01,
-      totalRmb: unit * count * 0.01,
+      unitRmb: unit * 0.1,
+      totalRmb: unit * count * 0.1,
     };
   }
 
@@ -216,10 +214,10 @@
       apply(history.wallet);
       const priceEl = document.getElementById('walletPrices'); priceEl.replaceChildren();
       const priceLabels = { standard: '标准', high: '高质量', '4K': '4K' };
-      const modelLabels = { 'GPT Image 2 · 原生 4K': 'GPT Image 2 · 4K', 'GPT Image 2.5 Flare': 'GPT Image 2.5', 'GPT Image 2.5 Sunburst': 'GPT Image 2.5 Pro' };
+      const modelLabels = {};
       Object.entries(pricing.prices).forEach(([name, values]) => {
         const row = document.createElement('div'); row.className = 'wallet-row';
-        const format = (points, suffix='') => `${points} 积分（¥${(points * (pricing.pointValueRmb || 0.01)).toFixed(2)}）${suffix}`;
+        const format = (points, suffix='') => `${points} 积分（¥${(points * (pricing.pointValueRmb || 0.1)).toFixed(2)}）${suffix}`;
         const detail = Object.entries(values).filter(([key]) => key !== 'default').map(([key, value]) => `${priceLabels[key] || key} ${format(value)}`).join(' · ');
         const agentSuffix = name.startsWith('Agent ·') ? '（示例用量，实际按 token）' : ' / 张';
         row.innerHTML = `<span>${modelLabels[name] || name}</span><b>${detail || (name.startsWith('Agent ·') ? '约 ' : '') + format(values.default, agentSuffix)}</b>`; priceEl.appendChild(row);

@@ -8,6 +8,7 @@ const { resolveModel, listModels } = require('./src/model-router');
 const kie = require('./src/providers/kie');
 const mockImage = require('./src/providers/mock-image');
 const otterlImage = require('./src/providers/otterl-image');
+const rivoImage = require('./src/providers/rivo-image');
 const otterlChat = require('./src/providers/otterl-chat');
 const wallet = require('./src/wallet');
 const agentPricing = require('./src/agent-pricing');
@@ -47,7 +48,7 @@ const cachedTaskUrls = new Map();
 
 function preferredImageProvider() {
   const value = String(process.env.IMAGE_PROVIDER || 'auto').trim().toLowerCase();
-  return ['auto', 'kie', 'otterl'].includes(value) ? value : 'auto';
+  return ['auto', 'kie', 'otterl', 'rivo'].includes(value) ? value : 'auto';
 }
 
 function selectImageProvider(modelName, modelMeta) {
@@ -65,6 +66,19 @@ function selectImageProvider(modelName, modelMeta) {
     }
     return { name: 'otterl', client: otterlImage, warning: '' };
   }
+  if (modelMeta.provider === 'rivo') {
+    if (!rivoImage.supportsModel(modelName)) {
+      const error = new Error(`${modelName} 尚未配置 Rivo 模型映射。`);
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!rivoImage.configured()) {
+      const error = new Error('RIVO_API_KEY 未配置。请先在 Railway Variables 中填写。');
+      error.statusCode = 503;
+      throw error;
+    }
+    return { name: 'rivo', client: rivoImage, warning: '' };
+  }
   const preferred = preferredImageProvider();
   const supportedByOtterl = otterlImage.supportsModel(modelName);
   if (preferred === 'otterl' && !supportedByOtterl) {
@@ -79,7 +93,12 @@ function selectImageProvider(modelName, modelMeta) {
 function providerFromTaskApi(taskApi) {
   if (taskApi === 'mock') return { name: 'mock', client: mockImage };
   if (taskApi === 'otterl') return { name: 'otterl', client: otterlImage };
+  if (taskApi === 'rivo') return { name: 'rivo', client: rivoImage };
   return { name: 'kie', client: kie };
+}
+
+function requestedTaskApi(value) {
+  return ['mock', 'gpt4o', 'otterl', 'rivo'].includes(value) ? value : 'market';
 }
 
 function safeJsonError(res, error) {
@@ -143,7 +162,9 @@ app.get('/api/health', (req, res) => {
     maintenance: settings.maintenance,
     kieConfigured: Boolean((process.env.KIE_API_KEY || '').trim()),
     otterlConfigured: otterlImage.configured(),
+    rivoConfigured: rivoImage.configured(),
     imageProvider: preferredImageProvider(),
+    pointValueRmb: wallet.pointValueRmb(),
     models: listModels(),
     agentModels: otterlChat.listModels(),
   });
@@ -434,7 +455,7 @@ app.post('/api/agent/run', async (req, res) => {
     }
     const rawImages = Array.isArray(body.images) ? body.images.slice(0, 10) : [];
     const price = agentPricing.estimate(model);
-    const holdPoints = Math.max(price.total, Number(process.env.AGENT_RESERVE_POINTS || 10));
+    const holdPoints = Math.max(price.total, Number(process.env.AGENT_RESERVE_POINTS || 1));
     const reservePrice = { ...price, unit: holdPoints, total: holdPoints, unitRmb: holdPoints * wallet.pointValueRmb(), totalRmb: holdPoints * wallet.pointValueRmb() };
     const requestId = String(req.get('Idempotency-Key') || body.requestId || '').trim();
     const held = wallet.reserve(requestId, reservePrice);
@@ -673,7 +694,7 @@ app.get('/api/task/:taskId', async (req, res) => {
     if (!wallet.hasTask(req.params.taskId)) {
       return res.status(404).json({ ok: false, error: '当前账号没有这个图片任务' });
     }
-    const taskApi = req.query.api === 'mock' ? 'mock' : req.query.api === 'gpt4o' ? 'gpt4o' : req.query.api === 'otterl' ? 'otterl' : 'market';
+    const taskApi = requestedTaskApi(req.query.api);
     const selectedProvider = providerFromTaskApi(taskApi);
     const task = await selectedProvider.client.getTask(req.params.taskId, taskApi);
     let urls = task.resultUrls;
@@ -750,7 +771,7 @@ app.get('/api/task/:taskId/image', async (req, res) => {
     if (!wallet.hasTask(req.params.taskId)) {
       return res.status(404).json({ ok: false, error: '当前账号没有这个图片任务' });
     }
-    const taskApi = req.query.api === 'mock' ? 'mock' : req.query.api === 'gpt4o' ? 'gpt4o' : req.query.api === 'otterl' ? 'otterl' : 'market';
+    const taskApi = requestedTaskApi(req.query.api);
     const selectedProvider = providerFromTaskApi(taskApi);
     const task = await selectedProvider.client.getTask(req.params.taskId, taskApi);
     if (task.state !== 'success' || !Array.isArray(task.resultUrls) || !task.resultUrls.length) {
@@ -814,7 +835,7 @@ app.post('/api/task/:taskId/confirm-delivery', async (req, res) => {
     if (!wallet.hasTask(req.params.taskId)) {
       return res.status(404).json({ ok: false, error: '当前账号没有这个图片任务' });
     }
-    const taskApi = req.query.api === 'mock' ? 'mock' : req.query.api === 'gpt4o' ? 'gpt4o' : req.query.api === 'otterl' ? 'otterl' : 'market';
+    const taskApi = requestedTaskApi(req.query.api);
     const selectedProvider = providerFromTaskApi(taskApi);
     const task = await selectedProvider.client.getTask(req.params.taskId, taskApi);
     if (task.state !== 'success' || !Array.isArray(task.resultUrls) || !task.resultUrls.length) {
@@ -909,7 +930,7 @@ app.get('/api/tasks/stream', (req, res) => {
           const taskId = String(item.taskId || '');
           if (!ownedTaskIds.has(taskId)) continue;
           try {
-            const taskApi = ['mock', 'gpt4o', 'otterl'].includes(item.taskApi) ? item.taskApi : 'market';
+            const taskApi = requestedTaskApi(item.taskApi);
             const selectedProvider = providerFromTaskApi(taskApi);
             const task = await selectedProvider.client.getTask(taskId, taskApi);
             const state = String(task.state || 'waiting');

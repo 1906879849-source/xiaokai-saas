@@ -510,16 +510,14 @@
           <button class="select model-trigger" id="modelSelect"><span class="mini-model-logo gpt" id="modelLogo">G</span><span id="modelLabel" data-model="GPT Image 2">GPT Image 2</span><span>▾</span></button>
           <div class="model-menu" id="modelMenu">
             <div class="model-menu-title">选择模型</div>
+            <div class="model-group"><div class="model-group-head"><span class="model-logo gemini">G</span><span><b>Google</b><small>Rivo Media 图像模型</small></span></div>
+              <button class="model-choice" data-model="Nano Banana 2" data-logo="G" data-class="gemini"><span>Nano Banana 2</span><span class="model-check">✓</span></button>
+              <button class="model-choice" data-model="Nano Banana Pro" data-logo="G" data-class="gemini"><span>Nano Banana Pro</span><span class="model-check">✓</span></button>
+            </div>
             <div class="model-group"><div class="model-group-head"><span class="model-logo gpt">G</span><span><b>GPT</b><small>OpenAI 图像模型</small></span></div>
               <button class="model-choice on" data-model="GPT Image 2" data-logo="G" data-class="gpt"><span>GPT Image 2</span><span class="model-check">✓</span></button>
-              <button class="model-choice" data-model="GPT Image 2 · 4K 超分" data-logo="G" data-class="gpt"><span>GPT Image 2 · 4K 超分</span><span class="model-check">✓</span></button>
-              <button class="model-choice" data-model="GPT Image 2 · 原生 4K" data-display="GPT Image 2 · 4K" data-logo="G" data-class="gpt"><span>GPT Image 2 · 4K</span><span class="model-check">✓</span></button>
-              <button class="model-choice" data-model="GPT Image 2.5 Flare" data-display="GPT Image 2.5" data-logo="G" data-class="gpt"><span>GPT Image 2.5</span><span class="model-check">✓</span></button>
-              <button class="model-choice" data-model="GPT Image 2.5 Sunburst" data-display="GPT Image 2.5 Pro" data-logo="G" data-class="gpt"><span>GPT Image 2.5 Pro</span><span class="model-check">✓</span></button>
-            </div>
-            <div class="model-group"><div class="model-group-head"><span class="model-logo gemini">G</span><span><b>Gemini</b><small>Google 图像模型</small></span></div>
-              <button class="model-choice" data-model="Gemini 3 Pro Image" data-logo="G" data-class="gemini"><span>Gemini 3 Pro Image</span><span class="model-check">✓</span></button>
-              <button class="model-choice" data-model="Gemini 3.1 Flash Image" data-logo="G" data-class="gemini"><span>Gemini 3.1 Flash Image</span><span class="model-check">✓</span></button>
+              <button class="model-choice" data-model="GPT Image 2.5 Flare" data-logo="G" data-class="gpt"><span>GPT Image 2.5 Flare</span><span class="model-check">✓</span></button>
+              <button class="model-choice" data-model="GPT Image 2.5 Sunburst" data-logo="G" data-class="gpt"><span>GPT Image 2.5 Sunburst</span><span class="model-check">✓</span></button>
             </div>
           </div>
         </div>
@@ -741,7 +739,7 @@
   function triggerBlobDownload(blob,fileName){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=fileName;a.style.display='none';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}
   function providerTaskForImage(n,img){const candidates=[n,...document.querySelectorAll('[data-provider-tasks]')];for(const owner of candidates){let tasks=[],urls=[];try{tasks=JSON.parse(owner?.dataset?.providerTasks||'[]')}catch{}try{urls=JSON.parse(owner?.dataset?.outputUrls||'[]')}catch{}if(!Array.isArray(tasks)||!tasks.length)continue;let index=urls.findIndex(url=>String(url)===String(img.src)||String(img.src).endsWith(String(url)));if(index<0&&owner===n)index=0;if(index<0)continue;const task=tasks[Math.min(index,tasks.length-1)];if(task?.taskId)return{...task,index:0}}return null}
   function downloadBackendBase(){const saved=(localStorage.getItem('xiaokai-backend-url')||'').trim().replace(/\/$/,'');if(saved)return saved;if(location.protocol==='http:'||location.protocol==='https:'){if(location.hostname==='127.0.0.1'||location.hostname==='localhost')return location.port==='4318'?'':'http://127.0.0.1:4318';return''}return'http://127.0.0.1:4318'}
-  function taskImageUrl(task,index=0){if(!task?.taskId)return'';const api=task.taskApi==='gpt4o'?'gpt4o':task.taskApi==='mock'?'mock':task.taskApi==='otterl'?'otterl':'market';return downloadBackendBase()+'/api/task/'+encodeURIComponent(task.taskId)+'/image?api='+encodeURIComponent(api)+'&index='+encodeURIComponent(index)+'&delivery=ratio-v2'}
+  function taskImageUrl(task,index=0){if(!task?.taskId)return'';const api=task.taskApi==='gpt4o'?'gpt4o':task.taskApi==='mock'?'mock':task.taskApi==='otterl'?'otterl':task.taskApi==='rivo'?'rivo':'market';return downloadBackendBase()+'/api/task/'+encodeURIComponent(task.taskId)+'/image?api='+encodeURIComponent(api)+'&index='+encodeURIComponent(index)+'&delivery=ratio-v2'}
   async function downloadableImageBlob(n){const img=requireRealImage(n);if(!img)throw new Error('没有可下载的图片');const task=providerTaskForImage(n,img);let source=img.src;if(task)source=taskImageUrl(task,task.index||0);let response;try{response=await fetch(source,{credentials:'include'})}catch(error){throw new Error('无法连接生图后端，请确认服务已更新')}if(!response.ok){let message='HTTP '+response.status;try{const data=await response.json();message=data.error||message}catch{}throw new Error(message)}const contentType=String(response.headers.get('content-type')||'');if(contentType.includes('text/html')||contentType.includes('application/json'))throw new Error('下载接口返回的不是图片，请部署最新后端');const blob=await response.blob();if(!blob.size)throw new Error('下载到的图片为空');return blob}
   async function downloadImage(n){const img=requireRealImage(n);if(!img)return;try{const blob=await downloadableImageBlob(n),name=safeDownloadName(n.querySelector('.node-label')?.textContent||'KAI图片');triggerBlobDownload(blob,name+'.'+imageExtension(blob));note('原图已下载')}catch(error){note('下载失败：'+(error?.message||'未知错误'))}}
   function handleImageTool(tool,n){if(tool==='smart'||tool==='expand'||tool==='multi'||tool==='prompt')return openApiTool(n,tool);if(tool==='hd')return upscaleImage(n);if(tool==='cutout')return removeBackground(n);if(tool==='erase'||tool==='crop')return openEditor(n,tool);if(tool==='grid')return splitGrid(n);if(tool==='marker')return enableMarker(n);if(tool==='replace'){replacingNode=n;document.getElementById('replaceImageUpload').click();return}if(tool==='preview')return openImagePreview(n);if(tool==='download')return downloadImage(n)}
@@ -1080,13 +1078,11 @@
   document.querySelectorAll('[data-edge-action]').forEach(b=>b.onclick=()=>{const action=b.dataset.edgeAction,path=selectedEdge;if(!path)return;if(action==='delete')return deleteEdge(path);if(action==='earlier'||action==='later'){const svg=document.querySelector('.wire'),before=[...svg.querySelectorAll('path[data-a][data-b]')],same=before.filter(p=>p.dataset.b===path.dataset.b),i=same.indexOf(path),swap=action==='earlier'?same[i-1]:same[i+1];if(!swap)return note('已经位于当前顺序边界');if(action==='earlier')svg.insertBefore(path,swap);else svg.insertBefore(swap,path);const after=[...svg.querySelectorAll('path[data-a][data-b]')],applyOrder=list=>{list.forEach(p=>svg.appendChild(p));wires()};commitHistory({undo:()=>applyOrder(before),redo:()=>applyOrder(after)});wires();scheduleSave();document.getElementById('edgeMenu').classList.remove('open');note('输入顺序已调整');return}const a=document.getElementById(path.dataset.a),z=document.getElementById(path.dataset.b);if(!a||!z)return;const svg=document.querySelector('.wire'),oldNext=path.nextSibling,text=createTextNode('text',(a.offsetLeft+z.offsetLeft)/2,(a.offsetTop+z.offsetTop)/2,'',false),created=[];path.remove();[[a,text],[text,z]].forEach(([from,to])=>{const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.dataset.a=from.id;p.dataset.b=to.id;svg.appendChild(p);bindEdge(p);created.push(p)});commitHistory({undo:()=>{created.forEach(p=>p.remove());text.remove();svg.insertBefore(path,oldNext);bindEdge(path);wires()},redo:()=>{path.remove();world.appendChild(text);created.forEach(p=>{svg.appendChild(p);bindEdge(p)});wires()}});selectedEdge=null;document.getElementById('edgeMenu').classList.remove('open');wires();note('已在连线上插入文字节点')});
   document.getElementById('modelSelect').onclick=e=>{e.stopPropagation();document.getElementById('modelMenu').classList.toggle('open')};
   const MODEL_RESOLUTION_OPTIONS={
-    'GPT Image 2':['1K','2K'],
-    'GPT Image 2 · 4K 超分':['4K'],
-    'GPT Image 2 · 原生 4K':['4K'],
-    'GPT Image 2.5 Flare':['1K','2K'],
-    'GPT Image 2.5 Sunburst':['1K','2K'],
-    'Gemini 3 Pro Image':['1K','2K','4K'],
-    'Gemini 3.1 Flash Image':['1K','2K','4K']
+    'Nano Banana 2':['1K','2K','4K'],
+    'Nano Banana Pro':['1K','2K','4K'],
+    'GPT Image 2':['1K','2K','4K'],
+    'GPT Image 2.5 Flare':['1K'],
+    'GPT Image 2.5 Sunburst':['1K']
   };
   function configureResolutionForModel(model){
     const buttons=[...document.querySelectorAll('.resolution-grid button')];
@@ -2449,7 +2445,7 @@ splitGrid=async function(n){
     const background=optionText('.background-grid',st.background,'默认');
     return{aspectRatio,resolution,count,background};
   }
-  const KIE_IMAGE_MODELS=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','GPT Image 2 · 原生 4K','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
+  const KIE_IMAGE_MODELS=new Set(['Nano Banana 2','Nano Banana Pro','GPT Image 2','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst']);
   function isRealModel(name){return KIE_IMAGE_MODELS.has(name)}
   function taskDuration(task){
     if(task.durationMs)return task.durationMs;
@@ -2578,7 +2574,7 @@ splitGrid=async function(n){
       if(!url)throw new Error('上游没有返回可确认的图片地址，暂不扣积分');
       const dimensions=await loadDeliveredImage(url);
       const meta=providerTasks.find(task=>task.taskId===item.taskId)||{};
-      const api=meta.taskApi==='gpt4o'?'?api=gpt4o':meta.taskApi==='mock'?'?api=mock':meta.taskApi==='otterl'?'?api=otterl':'';
+      const api=meta.taskApi==='gpt4o'?'?api=gpt4o':meta.taskApi==='mock'?'?api=mock':meta.taskApi==='otterl'?'?api=otterl':meta.taskApi==='rivo'?'?api=rivo':'';
       try{
         const confirmed=await apiFetch('/api/task/'+encodeURIComponent(item.taskId)+'/confirm-delivery'+api,{method:'POST',body:dimensions,timeoutMs:90000});
         window.KAI_WALLET?.apply(confirmed.wallet);confirmedCount+=1;
@@ -2604,7 +2600,7 @@ splitGrid=async function(n){
       for(const item of providerTasks){
         const prev=states.get(item.taskId)||{};
         if(prev.state==='success'||prev.state==='fail')continue;
-        const taskApi=item.taskApi==='gpt4o'?'?api=gpt4o':item.taskApi==='mock'?'?api=mock':item.taskApi==='otterl'?'?api=otterl':'';
+        const taskApi=item.taskApi==='gpt4o'?'?api=gpt4o':item.taskApi==='mock'?'?api=mock':item.taskApi==='otterl'?'?api=otterl':item.taskApi==='rivo'?'?api=rivo':'';
         const data=await apiFetch('/api/task/'+encodeURIComponent(item.taskId)+taskApi,{controller,timeoutMs:45000});
         states.set(item.taskId,data);
         if(data.state!=='success'&&data.state!=='fail')allTerminal=false;
@@ -2623,14 +2619,14 @@ splitGrid=async function(n){
       setNodeStatus(node,'running',task.phase==='generating'?'生成中':'上传中');
       renderTaskQueue();
       if(allTerminal)break;
-      await delay(providerTasks.some(x=>x.taskApi==='mock')?250:providerTasks.some(x=>x.taskApi==='otterl')?800:2600,controller.signal);
+      await delay(providerTasks.some(x=>x.taskApi==='mock')?250:providerTasks.some(x=>x.taskApi==='otterl'||x.taskApi==='rivo')?800:2600,controller.signal);
     }
     // Do one last authoritative read at the deadline. The result may have become
     // ready between the last polling tick and the deadline.
     for(const item of providerTasks){
       const prev=states.get(item.taskId)||{};
       if(prev.state==='success'||prev.state==='fail')continue;
-      const taskApi=item.taskApi==='gpt4o'?'?api=gpt4o':item.taskApi==='mock'?'?api=mock':item.taskApi==='otterl'?'?api=otterl':'';
+      const taskApi=item.taskApi==='gpt4o'?'?api=gpt4o':item.taskApi==='mock'?'?api=mock':item.taskApi==='otterl'?'?api=otterl':item.taskApi==='rivo'?'?api=rivo':'';
       try{states.set(item.taskId,await apiFetch('/api/task/'+encodeURIComponent(item.taskId)+taskApi,{controller,timeoutMs:45000}))}catch{}
     }
     const list=[...states.values()];
@@ -2709,7 +2705,7 @@ splitGrid=async function(n){
       setNodeStatus(node,'done',delivery.warnings.length?'已完成·规格提示':result.failures.length?'部分成功':'已完成');
       if(delivery.warnings.length)note(delivery.warnings[0]);
       else if(delivery.confirmedCount)note('图片已确认加载成功，客户积分已正式扣除');
-      else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'图片生成完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
+      else if(task.apiWarnings?.length)note(task.apiWarnings[0]);else note(task.provider==='mock'?'图片生成完成':task.provider==='rivo'?'Rivo 真实生图完成':task.provider==='otterl'?'OtterL 真实生图完成':'Kie 真实生图完成');
     }catch(error){
       if(['canceled','detached'].includes(task.status))return;
       // Recovery may finish while the original long poll is unwinding. Never let
@@ -2726,7 +2722,7 @@ splitGrid=async function(n){
         const lookup=await lookupSubmittedTasks(task.billingRequestId);
         if(lookup.tasks.length){
           rememberProviderTasks(node,task,lookup.tasks,task.resolvedPrompt||'');
-          task.provider=lookup.tasks.some(item=>item.taskApi==='otterl')?'otterl':lookup.tasks.some(item=>item.taskApi==='mock')?'mock':'kie';
+          task.provider=lookup.tasks.some(item=>item.taskApi==='rivo')?'rivo':lookup.tasks.some(item=>item.taskApi==='otterl')?'otterl':lookup.tasks.some(item=>item.taskApi==='mock')?'mock':'kie';
           task.status='running';task.phase='generating';task.note='提交响应中断，已按请求 ID 找回原任务；请勿重复提交';
           setNodeStatus(node,'running','恢复原任务');renderTaskQueue();
           try{await saveProject()}catch{}
@@ -2767,7 +2763,7 @@ splitGrid=async function(n){
       showGenerationFailure(node,task,task.errorReason,failedPhase);
       setNodeStatus(node,'error','失败·查看原因');
       const badge=node.querySelector(':scope > .node-status');if(badge)badge.title=task.errorReason;
-      note((task.model==='test-image'?'Mock：':task.provider==='otterl'?'OtterL：':'图片服务：')+task.errorReason);
+      note((task.model==='test-image'?'Mock：':task.provider==='rivo'?'Rivo：':task.provider==='otterl'?'OtterL：':'图片服务：')+task.errorReason);
     }finally{
       realAbortControllers.delete(task.id);
       node.__kaiLivePolling=false;
@@ -2844,7 +2840,7 @@ splitGrid=async function(n){
   // 启动时检查后端是否在线；不会读取或暴露 Kie Key。
   requestAnimationFrame(()=>{
     apiFetch('/api/health',{timeoutMs:3500}).then(data=>{
-      if(!data.kieConfigured)note('后端已连接，但还没有在 .env 配置 KIE_API_KEY');
+      if(!data.rivoConfigured)note('后端已连接，但还没有在 Railway Variables 配置 RIVO_API_KEY');
     }).catch(()=>{});
   });
   // Expose the two task helpers while they are still inside their defining scope.
@@ -2855,7 +2851,7 @@ splitGrid=async function(n){
 /* MODEL_SELECTION_SYNC_FIX_V1_1 */
 (function(){
   let restoringNodeModel=false;
-  const supportedRealModels=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','GPT Image 2 · 原生 4K','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
+  const supportedRealModels=new Set(['Nano Banana 2','Nano Banana Pro','GPT Image 2','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst']);
   const _applyModelChoiceSync=applyModelChoice;
   applyModelChoice=function(model){
     _applyModelChoiceSync(model);
@@ -2895,7 +2891,7 @@ splitGrid=async function(n){
     document.querySelectorAll('.model-choice').forEach(btn=>{
       const supported=supportedRealModels.has(btn.dataset.model);
       btn.classList.toggle('api-not-connected',!supported);
-      btn.title=supported?(btn.dataset.model==='test-image'?'本地 Mock 已接入':'Kie V1 已接入'):'当前图片后端尚未接入此模型';
+      btn.title=supported?(btn.dataset.model==='test-image'?'本地 Mock 已接入':'Rivo 图片接口已接入'):'当前图片后端尚未接入此模型';
       btn.setAttribute('aria-disabled',supported?'false':'true');
     });
   }
@@ -2918,7 +2914,7 @@ splitGrid=async function(n){
 
 /* MODEL_SOURCE_OF_TRUTH_FIX_V1_2 */
 (function(){
-  const REAL_SUPPORTED_MODELS_V12=new Set(['GPT Image 2','GPT Image 2 · 4K 超分','GPT Image 2 · 原生 4K','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst','Gemini 3 Pro Image','Gemini 3.1 Flash Image']);
+  const REAL_SUPPORTED_MODELS_V12=new Set(['Nano Banana 2','Nano Banana Pro','GPT Image 2','GPT Image 2.5 Flare','GPT Image 2.5 Sunburst']);
   const modelLabelElV12=document.getElementById('modelLabel');
 
   function visibleModelV12(){
@@ -3099,7 +3095,7 @@ splitGrid=async function(n){
     const task={
       id:'recovery-'+Date.now(),nodeId:node.id,name:strippedNodeName(node),type:'generation',status:'running',phase:'generating',
       note:'正在找回生成结果',createdAt:Number(node.dataset.providerSubmittedAt||Date.now()),
-      provider:providerTasks.some(x=>x.taskApi==='mock')?'mock':providerTasks.some(x=>x.taskApi==='otterl')?'otterl':'kie',
+      provider:providerTasks.some(x=>x.taskApi==='mock')?'mock':providerTasks.some(x=>x.taskApi==='rivo')?'rivo':providerTasks.some(x=>x.taskApi==='otterl')?'otterl':'kie',
       providerTasks,
       model:node.dataset.providerModel||node.dataset.modelName||'GPT Image 2',
       sizeState:node.dataset.providerSizeState||node.dataset.sizeState||'',
@@ -3278,7 +3274,7 @@ splitGrid=async function(n){
     if(legacyCandidates.length!==1)return Promise.all(recoveries);
     try{
       const data=await apiFetch('/api/tasks/recent?limit=12',{timeoutMs:10000});
-      const recent=(data.tasks||[]).find(item=>item?.taskId&&!claimed.has(item.taskId)&&item.state!=='released'&&['market','gpt4o','otterl','mock'].includes(item.taskApi||'market'));
+      const recent=(data.tasks||[]).find(item=>item?.taskId&&!claimed.has(item.taskId)&&item.state!=='released'&&['market','gpt4o','otterl','rivo','mock'].includes(item.taskApi||'market'));
       if(!recent)return Promise.all(recoveries);
       const node=legacyCandidates[0];
       const tasks=[{taskId:recent.taskId,taskApi:recent.taskApi||'market',providerModel:recent.model||''}];

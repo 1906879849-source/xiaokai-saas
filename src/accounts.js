@@ -10,11 +10,25 @@ const TMP_FILE = path.join(DATA_DIR, 'accounts.tmp.json');
 const RECEIPT_DIR = path.join(DATA_DIR, 'receipts');
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000;
 
-function emptyStore() { return { version: 1, users: {}, usernameIndex: {}, sessions: {}, recharges: {} }; }
+function emptyStore() { return { version: 2, users: {}, usernameIndex: {}, sessions: {}, recharges: {} }; }
 function load() {
   fs.mkdirSync(RECEIPT_DIR, { recursive: true });
   if (!fs.existsSync(STORE_FILE)) return emptyStore();
-  try { return { ...emptyStore(), ...JSON.parse(fs.readFileSync(STORE_FILE, 'utf8')) }; }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+    if (Number(parsed?.version || 1) < 2) {
+      parsed.recharges = Object.fromEntries(Object.entries(parsed.recharges || {}).map(([id, item]) => [id, {
+        ...item,
+        points: Number.isFinite(Number(item.points)) ? Number((Number(item.points) / 10).toFixed(4)) : item.points,
+      }]));
+      parsed.version = 2;
+      const backup = `${STORE_FILE}.before-point-scale-v2.bak`;
+      if (!fs.existsSync(backup)) fs.copyFileSync(STORE_FILE, backup);
+      fs.writeFileSync(TMP_FILE, JSON.stringify({ ...emptyStore(), ...parsed }, null, 2));
+      fs.renameSync(TMP_FILE, STORE_FILE);
+    }
+    return { ...emptyStore(), ...parsed };
+  }
   catch { throw new Error('账号数据文件损坏，请先备份 data/accounts.json'); }
 }
 let store = load();
@@ -140,7 +154,7 @@ function createRecharge({ userId, amountRmb, channel, payerNote, receiptDataUrl,
   if (existing) return { ...existing, receiptFile: undefined, duplicate: true };
   const receiptFile = receiptDataUrl ? saveReceipt(userId, receiptDataUrl) : '';
   const id = `RC${new Date().toISOString().slice(0, 10).replace(/-/g, '')}${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
-  const item = { id, userId, clientRequestId: requestKey, amountRmb: Number(amount.toFixed(2)), points: Math.round(amount * 100), channel, payerNote: String(payerNote || '').trim().slice(0, 120), receiptFile, status: 'pending', createdAt: Date.now(), reviewedAt: 0, reviewerId: '', reviewNote: '' };
+  const item = { id, userId, clientRequestId: requestKey, amountRmb: Number(amount.toFixed(2)), points: Math.round(amount * 10), channel, payerNote: String(payerNote || '').trim().slice(0, 120), receiptFile, status: 'pending', createdAt: Date.now(), reviewedAt: 0, reviewerId: '', reviewNote: '' };
   store.recharges[id] = item; persist(); return { ...item, receiptFile: undefined };
 }
 function listRecharges(userId, limit = 30) {

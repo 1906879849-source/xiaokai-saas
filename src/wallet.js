@@ -20,54 +20,20 @@ function intEnv(name, fallback) {
   return Number.isInteger(value) && value >= 0 ? value : fallback;
 }
 
-function numberEnv(name, fallback) {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-// 面向用户的积分汇率：100 KAI 积分 = 1 元人民币。
-const POINT_VALUE_RMB = numberEnv('KAI_POINT_VALUE_RMB', 0.01);
+// 面向用户的积分汇率固定为：10 KAI 积分 = 1 元人民币。
+// 不再让 Railway 中遗留的 0.01 环境变量覆盖新汇率，否则余额迁移后会损失人民币价值。
+const POINT_VALUE_RMB = 0.1;
 
 const PRICES = {
   'Agent · GPT 5.5 Vision · 省积分': { default: agentPricing.estimate('GPT 5.5 Vision · 省积分').total },
   'Agent · GPT 5.5 Vision · 高质量': { default: agentPricing.estimate('GPT 5.5 Vision · 高质量').total },
   'Agent · Gemini 3.1 Flash Lite · 省积分': { default: agentPricing.estimate('Gemini 3.1 Flash Lite · 省积分').total },
   'Agent · Gemini 3 Flash · 标准': { default: agentPricing.estimate('Gemini 3 Flash · 标准').total },
-  'GPT Image 2': {
-    '1K': intEnv('PRICE_GPT_IMAGE_2_1K', intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24)),
-    '2K': intEnv('PRICE_GPT_IMAGE_2_2K', 24),
-    standard: intEnv('PRICE_GPT_IMAGE_2_1K', intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24)),
-    high: intEnv('PRICE_GPT_IMAGE_2_2K', 24),
-    default: intEnv('PRICE_GPT_IMAGE_2_1K', intEnv('PRICE_GPT_IMAGE_2_STANDARD', 24)),
-  },
-  'GPT Image 2 · 4K 超分': { default: intEnv('PRICE_GPT_IMAGE_2_4K_UPSCALE', 24) },
-  'GPT Image 2 · 原生 4K': { default: intEnv('PRICE_GPT_IMAGE_2_NATIVE_4K', 40) },
-  'GPT Image 2.5 Flare': {
-    '1K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_1K', intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24)),
-    '2K': intEnv('PRICE_GPT_IMAGE_2_5_FLARE_2K', 24),
-    standard: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_1K', intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24)),
-    high: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_2K', 24),
-    default: intEnv('PRICE_GPT_IMAGE_2_5_FLARE_1K', intEnv('PRICE_GPT_IMAGE_2_5_FLARE_STANDARD', 24)),
-  },
-  'GPT Image 2.5 Sunburst': {
-    '1K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_1K', intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24)),
-    '2K': intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_2K', 24),
-    standard: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_1K', intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24)),
-    high: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_2K', 24),
-    default: intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_1K', intEnv('PRICE_GPT_IMAGE_2_5_SUNBURST_STANDARD', 24)),
-  },
-  'Gemini 3 Pro Image': {
-    '1K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_1K', intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80)),
-    '2K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_2K', intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80)),
-    '4K': intEnv('PRICE_GEMINI_3_PRO_IMAGE_4K', intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80)),
-    default: intEnv('PRICE_GEMINI_3_PRO_IMAGE', 80),
-  },
-  'Gemini 3.1 Flash Image': {
-    '1K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_1K', intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60)),
-    '2K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_2K', intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60)),
-    '4K': intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE_4K', intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60)),
-    default: intEnv('PRICE_GEMINI_3_1_FLASH_IMAGE', 60),
-  },
+  'Nano Banana 2': { '1K': 3, '2K': 4, '4K': 5, default: 3 },
+  'Nano Banana Pro': { '1K': 3, '2K': 5, '4K': 6, default: 3 },
+  'GPT Image 2': { '1K': 2, '2K': 3, '4K': 5, default: 2 },
+  'GPT Image 2.5 Flare': { '1K': 3, default: 3 },
+  'GPT Image 2.5 Sunburst': { '1K': 4, default: 4 },
 };
 
 function currentUserId() { return String(context.getStore()?.userId || 'local').replace(/[^a-zA-Z0-9_-]/g, '_'); }
@@ -82,9 +48,9 @@ function migrateLegacyWallet(userId) {
   fs.copyFileSync(legacy, target);
 }
 function blankStore(userId = currentUserId()) {
-  const starting = userId === 'local' ? intEnv('WALLET_STARTING_CREDITS', 1000) : intEnv('ACCOUNT_SIGNUP_CREDITS', 0);
+  const starting = userId === 'local' ? intEnv('WALLET_STARTING_CREDITS', 100) : intEnv('ACCOUNT_SIGNUP_CREDITS', 0);
   return {
-    version: 1,
+    version: 2,
     balance: starting,
     reserved: 0,
     reservations: {},
@@ -105,10 +71,61 @@ function load(userId = currentUserId()) {
   if (!fs.existsSync(file)) return blankStore(userId);
   try {
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return { ...blankStore(userId), ...value };
+    const migrated = migratePointScale({ ...blankStore(userId), ...value });
+    if (migrated.changed) {
+      const backup = `${file}.before-point-scale-v2.bak`;
+      if (!fs.existsSync(backup)) fs.copyFileSync(file, backup);
+      const tmp = `${file}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(migrated.store, null, 2));
+      fs.renameSync(tmp, file);
+    }
+    return migrated.store;
   } catch {
     throw new Error('积分数据文件损坏，请先备份 data/wallet.json');
   }
+}
+
+function scaledPoints(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Number((number / 10).toFixed(4)) : value;
+}
+
+function scaleQuote(quote) {
+  if (!quote || typeof quote !== 'object') return quote;
+  const next = { ...quote, pointValueRmb: 0.1 };
+  for (const key of ['unit', 'total']) if (Number.isFinite(Number(next[key]))) next[key] = scaledPoints(next[key]);
+  return next;
+}
+
+function migratePointScale(input) {
+  if (Number(input?.version || 1) >= 2) return { store: input, changed: false };
+  const next = { ...input, version: 2, balance: scaledPoints(input.balance), reserved: scaledPoints(input.reserved) };
+  next.reservations = Object.fromEntries(Object.entries(input.reservations || {}).map(([id, item]) => [id, {
+    ...item,
+    unit: scaledPoints(item.unit),
+    total: scaledPoints(item.total),
+    pointValueRmb: 0.1,
+  }]));
+  next.tasks = Object.fromEntries(Object.entries(input.tasks || {}).map(([id, item]) => [id, {
+    ...item,
+    price: scaledPoints(item.price),
+    ...(item.reservedPrice == null ? {} : { reservedPrice: scaledPoints(item.reservedPrice) }),
+    quote: scaleQuote(item.quote),
+  }]));
+  next.ledger = (input.ledger || []).map(item => ({
+    ...item,
+    amount: scaledPoints(item.amount),
+    meta: item.meta && typeof item.meta === 'object' ? {
+      ...item.meta,
+      ...(item.meta.held == null ? {} : { held: scaledPoints(item.meta.held) }),
+      ...(item.meta.quote ? { quote: scaleQuote(item.meta.quote) } : {}),
+    } : item.meta,
+  }));
+  next.grants = Object.fromEntries(Object.entries(input.grants || {}).map(([key, item]) => [key, {
+    ...item,
+    amount: scaledPoints(item.amount),
+  }]));
+  return { store: next, changed: true };
 }
 
 function activeStore() {
@@ -165,7 +182,11 @@ function quote({ model, resolution, count = 1 }) {
   }
   const dynamic = platformSettings.priceFor(model, resolution);
   if (!dynamic) {
-    const error = new Error(`模型未配置积分价格：${model || '未选择'}`);
+    const configuredModel = platformSettings.resolveModel(model);
+    const normalizedRequested = normalizeResolution(resolution);
+    const error = new Error(configuredModel && !configuredModel.resolutions.includes(normalizedRequested)
+      ? `${model} 不支持 ${normalizedRequested}`
+      : `模型未配置积分价格：${model || '未选择'}`);
     error.statusCode = 400;
     throw error;
   }
