@@ -18,6 +18,7 @@ const announcements = require('./src/announcements');
 const platformSettings = require('./src/platform-settings');
 const canvasCloud = require('./src/canvas-cloud');
 const { generatedDir } = require('./src/storage-paths');
+const { cleanupGeneratedAssets } = require('./src/generated-cleanup');
 
 const app = express();
 const PORT = Number(process.env.PORT || 4318);
@@ -25,6 +26,23 @@ const STARTED_AT = Date.now();
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const GENERATED_DIR = generatedDir();
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
+
+function runGeneratedCleanup() {
+  try {
+    const report = cleanupGeneratedAssets();
+    if (report.removed || process.env.LOG_GENERATED_CLEANUP === '1') console.log('[generated cleanup]', report);
+  } catch (error) {
+    console.error('[generated cleanup failed]', error?.message || error);
+  }
+}
+
+// Generated files are temporary working assets. A file remains protected while
+// any saved canvas, snapshot or asset-library record references it. Once the
+// final reference disappears it is deleted after seven days (configurable via
+// GENERATED_UNREFERENCED_TTL_MS). Existing files get a full grace period on the
+// first cleanup run, so deploying this change cannot immediately remove data.
+setTimeout(runGeneratedCleanup, 30 * 1000).unref();
+setInterval(runGeneratedCleanup, 6 * 60 * 60 * 1000).unref();
 
 app.disable('x-powered-by');
 // Railway terminates TLS in front of the app. Trust exactly that first proxy so
@@ -117,6 +135,14 @@ function extFromContentType(type = '') {
   if (/gif/i.test(type)) return '.gif';
   if (/jpeg|jpg/i.test(type)) return '.jpg';
   return '.png';
+}
+
+function importedAssetOwnerPrefix(userId) {
+  return crypto.createHash('sha256').update(String(userId || '')).digest('hex').slice(0, 20);
+}
+
+function userOwnsImportedAsset(userId, fileName) {
+  return String(fileName || '').startsWith(`project-${importedAssetOwnerPrefix(userId)}-`);
 }
 
 async function cacheRemoteResults(taskId, urls) {
@@ -363,6 +389,33 @@ app.put('/api/canvas-cloud', (req, res) => {
 app.delete('/api/canvas-cloud', (req, res) => {
   try {
     res.json({ ok: true, removed: canvasCloud.remove(req.user.id, req.query.key) });
+  } catch (error) { safeJsonError(res, error); }
+});
+
+// Restore a self-contained project package without embedding every image in the
+// canvas JSON. Each image is rebound to the currently signed-in account and is
+// then governed by the same reference-aware seven-day cleanup as generated art.
+app.post('/api/project-assets/import', (req, res) => {
+  try {
+    const mime = String(req.body?.mime || '').toLowerCase().split(';')[0].trim();
+    if (!/^image\/(?:png|jpeg|webp|gif|svg\+xml)$/.test(mime)) {
+      return res.status(400).json({ ok: false, error: '项目包内包含不支持的图片格式' });
+    }
+    const encoded = String(req.body?.base64 || '').replace(/\s+/g, '');
+    if (!encoded || !/^[a-z0-9+/]+={0,2}$/i.test(encoded)) {
+      return res.status(400).json({ ok: false, error: '项目包图片数据无效' });
+    }
+    const buffer = Buffer.from(encoded, 'base64');
+    if (!buffer.length) return res.status(400).json({ ok: false, error: '项目包图片为空' });
+    if (buffer.length > 45 * 1024 * 1024) {
+      return res.status(413).json({ ok: false, error: '单张图片超过 45MB，请压缩后重新打包' });
+    }
+    const fileName = `project-${importedAssetOwnerPrefix(req.user.id)}-${Date.now().toString(36)}-${crypto.randomBytes(8).toString('hex')}${extFromContentType(mime)}`;
+    const destination = path.join(GENERATED_DIR, fileName);
+    const temporary = `${destination}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, buffer);
+    fs.renameSync(temporary, destination);
+    res.json({ ok: true, url: `/generated/${fileName}`, size: buffer.length });
   } catch (error) { safeJsonError(res, error); }
 });
 
@@ -1065,7 +1118,7 @@ app.get('/generated/:fileName', requireSignedIn, (req, res) => {
   let fileName = '';
   try { fileName = decodeURIComponent(String(req.params.fileName || '')); }
   catch { return res.status(400).json({ ok: false, error: '图片地址无效' }); }
-  if (!fileName || path.basename(fileName) !== fileName || !wallet.ownsResultUrl(`/generated/${fileName}`)) {
+  if (!fileName || path.basename(fileName) !== fileName || (!wallet.ownsResultUrl(`/generated/${fileName}`) && !userOwnsImportedAsset(req.user.id, fileName))) {
     return res.status(404).json({ ok: false, error: '当前账号没有这张图片' });
   }
   const filePath = path.join(GENERATED_DIR, fileName);
