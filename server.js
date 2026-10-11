@@ -394,7 +394,23 @@ app.get('/api/admin/recharges', requireAdmin, (req, res) => {
   res.json({ ok: true, recharges: accounts.listRecharges('', req.query.limit || 100) });
 });
 app.get('/api/admin/users', requireAdmin, (req, res) => {
-  res.json({ ok: true, users: accounts.listUsers() });
+  const users = accounts.listUsers().map(user => ({
+    ...user,
+    wallet: wallet.runAs(user.id, () => wallet.publicWallet()),
+  }));
+  res.json({ ok: true, users });
+});
+app.post('/api/admin/wallets/reset-all', requireAdmin, (req, res) => {
+  try {
+    if (req.body?.confirmation !== 'RESET_ALL_WALLETS') return res.status(400).json({ ok: false, error: '缺少清零确认' });
+    const users = accounts.listUsers();
+    const results = users.map(user => ({
+      userId: user.id,
+      username: user.username,
+      wallet: wallet.runAs(user.id, () => wallet.resetBalance(`管理员 ${req.user.username} 清零积分`)),
+    }));
+    res.json({ ok: true, count: results.length, results });
+  } catch (error) { safeJsonError(res, error); }
 });
 app.post('/api/admin/users/:id/grant', requireAdmin, (req, res) => {
   try {
