@@ -27,6 +27,7 @@
     return 'http://127.0.0.1:4318';
   };
   let wallet = { balance: 0, reserved: 0, available: 0 };
+  const wholePoints = value => Math.round(Number(value) || 0);
   let quote = null;
   let currentUser = null;
   let announcedUserId = '';
@@ -71,7 +72,7 @@
   modal.className = 'wallet-modal';
   modal.innerHTML = `<section class="wallet-card" role="dialog" aria-modal="true" aria-label="积分账户">
     <div class="wallet-head"><h2>KAI 积分</h2><button class="wallet-close">×</button></div>
-    <div class="wallet-user"><span id="walletUser">未登录</span><span><a id="walletAdmin" href="/admin.html" target="_blank" hidden style="color:#8ebcff;margin-right:12px">管理员后台</a><button id="walletLogout">退出登录</button></span></div>
+    <div class="wallet-user"><span id="walletUser">未登录</span><span><button id="walletResetAll" hidden style="color:#ff969e;margin-right:12px">全部积分清零</button><a id="walletAdmin" href="/admin.html" target="_blank" hidden style="color:#8ebcff;margin-right:12px">管理员后台</a><button id="walletLogout">退出登录</button></span></div>
     <div class="wallet-balance"><strong id="walletAvailable">--</strong><small id="walletDetail">可用积分</small></div>
     <div class="wallet-note">10 KAI 积分 = ¥1.00。任务会先冻结积分，成功后按实际用量扣除，失败自动返还。</div>
     <h3>申请充值</h3><form class="recharge-box" id="rechargeForm"><div class="payment-qr"><img src="/payment/wechat-qr.png" alt="微信收款二维码"><b>① 微信扫码付款</b><small>收款人：kai（**凯）<br>¥1 = 10 积分</small></div><div class="payment-qr contact"><img src="/payment/wechat-contact-qr.png" alt="添加 kai 微信好友二维码"><b>② 添加客服微信</b><small>付款后添加好友<br>把付款信息发给我</small></div><div class="payment-reminder"><b>付款后请发送：</b>登录账号、付款金额、付款时间。这样可以更快核对到账，避免遗漏充值申请。</div><div class="arrival-note"><b>预计到账</b><span>当前为人工审核，通常 5–30 分钟到账。如超过 30 分钟仍未到账，请添加客服微信并发送订单号。</span></div><div class="package-grid"><button type="button" data-recharge-amount="10">¥10</button><button type="button" data-recharge-amount="30">¥30</button><button type="button" data-recharge-amount="50">¥50</button><button type="button" data-recharge-amount="100">¥100</button></div><input id="rechargeAmount" type="number" min="1" step="1" placeholder="充值金额（元）" required><select id="rechargeChannel"><option value="wechat">微信支付</option><option value="alipay" disabled>支付宝（尚未配置）</option></select><button class="wallet-action wide" type="submit">我已完成付款，提交审核</button></form>
@@ -90,9 +91,9 @@
   function apply(next) {
     if (!next) return;
     wallet = next;
-    document.getElementById('walletBalance').textContent = currentUser ? `积分 ${next.available}` : '登录';
-    document.getElementById('walletAvailable').textContent = next.available;
-    document.getElementById('walletDetail').textContent = `总额 ${next.balance}　冻结 ${next.reserved}`;
+    document.getElementById('walletBalance').textContent = currentUser ? `积分 ${wholePoints(next.available)}` : '登录';
+    document.getElementById('walletAvailable').textContent = wholePoints(next.available);
+    document.getElementById('walletDetail').textContent = `总额 ${wholePoints(next.balance)}　冻结 ${wholePoints(next.reserved)}`;
     button.classList.toggle('low', quote ? next.available < quote.total : next.available < 5);
     renderQuote();
   }
@@ -119,6 +120,7 @@
       const data = await json('/api/auth/me'); currentUser = data.user; apply(data.wallet);announceAuth(currentUser);
       document.getElementById('walletUser').textContent = `${currentUser.displayName || currentUser.username} · ${currentUser.username}`;
       document.getElementById('walletAdmin').hidden = currentUser.role !== 'admin';
+      document.getElementById('walletResetAll').hidden = currentUser.role !== 'admin';
       return true;
     } catch {
       currentUser = null; wallet = { balance: 0, reserved: 0, available: 0 }; apply(wallet);announceAuth(null);refreshQuote(); return false;
@@ -217,7 +219,7 @@
       const modelLabels = {};
       Object.entries(pricing.prices).forEach(([name, values]) => {
         const row = document.createElement('div'); row.className = 'wallet-row';
-        const format = (points, suffix='') => `${points} 积分（¥${(points * (pricing.pointValueRmb || 0.1)).toFixed(2)}）${suffix}`;
+        const format = (points, suffix='') => `${wholePoints(points)} 积分（¥${(wholePoints(points) * (pricing.pointValueRmb || 0.1)).toFixed(2)}）${suffix}`;
         const detail = Object.entries(values).filter(([key]) => key !== 'default').map(([key, value]) => `${priceLabels[key] || key} ${format(value)}`).join(' · ');
         const agentSuffix = name.startsWith('Agent ·') ? '（示例用量，实际按 token）' : ' / 张';
         row.innerHTML = `<span>${modelLabels[name] || name}</span><b>${detail || (name.startsWith('Agent ·') ? '约 ' : '') + format(values.default, agentSuffix)}</b>`; priceEl.appendChild(row);
@@ -250,6 +252,17 @@
     catch(error){ alert(error.message); }
   };
   document.getElementById('walletLogout').onclick = async () => { try{await json('/api/auth/logout',{method:'POST'})}catch{} currentUser=null;announceAuth(null);modal.classList.remove('open');apply({balance:0,reserved:0,available:0});showAuth('login'); };
+  document.getElementById('walletResetAll').onclick = async event => {
+    if (!currentUser || currentUser.role !== 'admin') return;
+    if (!confirm('只清零所有现有账户的积分余额和冻结额；账号、画布、图片和模型配置都不会删除。确定继续吗？')) return;
+    event.currentTarget.disabled = true;
+    try {
+      const result = await json('/api/admin/wallets/reset-all', { method:'POST', body:JSON.stringify({ confirmation:'RESET_ALL_WALLETS' }) });
+      await loadAccount();
+      alert(`已清零 ${result.count} 个账户的积分`);
+    } catch (error) { alert(error.message); }
+    finally { event.currentTarget.disabled = false; }
+  };
   document.querySelectorAll('[data-recharge-amount]').forEach(button => button.onclick = () => {
     document.querySelectorAll('[data-recharge-amount]').forEach(item => item.classList.toggle('on', item === button));
     document.getElementById('rechargeAmount').value = button.dataset.rechargeAmount;
