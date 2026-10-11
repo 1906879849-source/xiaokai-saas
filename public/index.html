@@ -972,7 +972,62 @@
   }
   function saveProject(){projectSaveChain=projectSaveChain.catch(()=>{}).then(persistProjectNow);return projectSaveChain}
   async function loadSavedProject(){try{const saved=await dbRead('project:'+activeProjectId)||await dbRead('current');if(saved)restoreProject(saved);else updateSaveMeta()}catch(error){isRestoring=false;console.error('本地画布读取失败',error);updateSaveMeta('可继续使用');note('本地缓存恢复异常，已保留当前画布')}}
-  function exportProject(){const data=serializeProject(),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(data.name||'xiaokai画布')+'.xiaokai.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);note('画布备份已导出')}
+  const zipTextEncoder=new TextEncoder(),zipTextDecoder=new TextDecoder();
+  const zipCrcTable=(()=>{const table=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=(c&1)?(0xedb88320^(c>>>1)):(c>>>1);table[n]=c>>>0}return table})();
+  function zipCrc32(bytes){let crc=0xffffffff;for(const byte of bytes)crc=zipCrcTable[(crc^byte)&255]^(crc>>>8);return(crc^0xffffffff)>>>0}
+  function zipConcat(parts){const size=parts.reduce((sum,part)=>sum+part.byteLength,0),out=new Uint8Array(size);let offset=0;parts.forEach(part=>{out.set(part,offset);offset+=part.byteLength});return out}
+  function zipEntryBytes(value){if(value instanceof Uint8Array)return value;if(value instanceof ArrayBuffer)return new Uint8Array(value);return zipTextEncoder.encode(String(value))}
+  function createStoreZip(entries){
+    const local=[],central=[];let offset=0;
+    entries.forEach(entry=>{
+      const name=zipTextEncoder.encode(entry.name),data=zipEntryBytes(entry.data),crc=zipCrc32(data),localHeader=new Uint8Array(30+name.length),lv=new DataView(localHeader.buffer);
+      lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint16(6,0x0800,true);lv.setUint16(8,0,true);lv.setUint32(14,crc,true);lv.setUint32(18,data.length,true);lv.setUint32(22,data.length,true);lv.setUint16(26,name.length,true);localHeader.set(name,30);
+      const centralHeader=new Uint8Array(46+name.length),cv=new DataView(centralHeader.buffer);cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint16(8,0x0800,true);cv.setUint16(10,0,true);cv.setUint32(16,crc,true);cv.setUint32(20,data.length,true);cv.setUint32(24,data.length,true);cv.setUint16(28,name.length,true);cv.setUint32(42,offset,true);centralHeader.set(name,46);
+      local.push(localHeader,data);central.push(centralHeader);offset+=localHeader.length+data.length;
+    });
+    const centralBytes=zipConcat(central),end=new Uint8Array(22),ev=new DataView(end.buffer);ev.setUint32(0,0x06054b50,true);ev.setUint16(8,entries.length,true);ev.setUint16(10,entries.length,true);ev.setUint32(12,centralBytes.length,true);ev.setUint32(16,offset,true);return zipConcat([...local,centralBytes,end])
+  }
+  function readStoreZip(buffer){
+    const bytes=new Uint8Array(buffer),view=new DataView(buffer);let end=-1;
+    for(let i=bytes.length-22;i>=Math.max(0,bytes.length-65557);i--){if(view.getUint32(i,true)===0x06054b50){end=i;break}}
+    if(end<0)throw new Error('项目包结构不完整');const count=view.getUint16(end+10,true),entries=new Map();let cursor=view.getUint32(end+16,true);
+    for(let i=0;i<count;i++){
+      if(view.getUint32(cursor,true)!==0x02014b50)throw new Error('项目包目录损坏');const method=view.getUint16(cursor+10,true),size=view.getUint32(cursor+24,true),nameLen=view.getUint16(cursor+28,true),extraLen=view.getUint16(cursor+30,true),commentLen=view.getUint16(cursor+32,true),localOffset=view.getUint32(cursor+42,true),name=zipTextDecoder.decode(bytes.slice(cursor+46,cursor+46+nameLen));
+      if(method!==0)throw new Error('项目包使用了不支持的压缩方式');if(view.getUint32(localOffset,true)!==0x04034b50)throw new Error('项目包文件损坏');const localNameLen=view.getUint16(localOffset+26,true),localExtraLen=view.getUint16(localOffset+28,true),start=localOffset+30+localNameLen+localExtraLen;entries.set(name,bytes.slice(start,start+size));cursor+=46+nameLen+extraLen+commentLen;
+    }
+    return entries
+  }
+  function portableImageSource(value){return /^(?:data:image\/|blob:|https?:\/\/|\/generated\/)/i.test(String(value||''))}
+  function collectPortableValues(value,sources){if(typeof value==='string'){if(portableImageSource(value))sources.add(value);else if(/^[\[{]/.test(value.trim())){try{collectPortableValues(JSON.parse(value),sources)}catch{}}return}if(Array.isArray(value)){value.forEach(item=>collectPortableValues(item,sources));return}if(value&&typeof value==='object')Object.values(value).forEach(item=>collectPortableValues(item,sources))}
+  function collectProjectImageSources(data){const sources=new Set();(data.nodes||[]).forEach(saved=>{if(!saved?.html)return;const template=document.createElement('template');template.innerHTML=saved.html;template.content.querySelectorAll('*').forEach(element=>[...element.attributes].forEach(attribute=>collectPortableValues(attribute.value,sources)))});return[...sources]}
+  function imageExtension(type,source){const mime=String(type||'').toLowerCase();if(mime.includes('jpeg'))return'jpg';if(mime.includes('webp'))return'webp';if(mime.includes('gif'))return'gif';if(mime.includes('svg'))return'svg';const match=String(source||'').match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i);return match?.[1]?.toLowerCase()||'png'}
+  function packageMime(name){const ext=String(name).split('.').pop().toLowerCase();return({jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',svg:'image/svg+xml',png:'image/png'})[ext]||'application/octet-stream'}
+  function replaceEvery(source,from,to){return String(source).split(from).join(to)}
+  function bytesToDataUrl(bytes,mime){let binary='';for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));return`data:${mime};base64,${btoa(binary)}`}
+  async function restorePackageAsset(bytes,mime){
+    const dataUrl=bytesToDataUrl(bytes,mime),base64=dataUrl.slice(dataUrl.indexOf(',')+1);let response;
+    try{response=await fetch('/api/project-assets/import',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({mime,base64})})}catch{throw new Error('无法把项目包图片恢复到云端，请检查网络后重试')}
+    if(response.status===401)return dataUrl;const payload=await response.json().catch(()=>({}));if(!response.ok||!payload.url)throw new Error(payload.error||'项目包图片恢复失败');return payload.url
+  }
+  function detachImportedProviderTasks(data){
+    (data.nodes||[]).forEach(saved=>{if(!saved?.html)return;const template=document.createElement('template');template.innerHTML=saved.html;template.content.querySelectorAll('[data-provider-tasks]').forEach(node=>node.removeAttribute('data-provider-tasks'));saved.html=template.innerHTML});return data
+  }
+  async function exportProject(){
+    try{const data=serializeProject();data.id=activeProjectId;const sources=collectProjectImageSources(data),manifest={format:'xiaokai-project-package',version:1,createdAt:new Date().toISOString(),projectFile:'project.json',assets:[]};let serialized=JSON.stringify(data),assetNumber=0;
+    note(sources.length?'正在打包画布和图片…':'正在打包画布…');const entries=[];
+    for(const source of sources){
+      let response;try{response=await fetch(source,{credentials:'same-origin'})}catch{throw new Error('有图片无法读取，请确认图片仍能正常显示后再导出')}
+      if(!response.ok)throw new Error('有图片已经失效，请先恢复或删除失效图片');const blob=await response.blob(),bytes=new Uint8Array(await blob.arrayBuffer()),name=`assets/${String(++assetNumber).padStart(4,'0')}.${imageExtension(blob.type,source)}`,placeholder='xiaokai-asset://'+name;serialized=replaceEvery(serialized,source,placeholder);manifest.assets.push({path:name,mime:blob.type||packageMime(name),size:bytes.length});entries.push({name,data:bytes});
+    }
+    entries.unshift({name:'project.json',data:JSON.stringify(JSON.parse(serialized),null,2)},{name:'manifest.json',data:JSON.stringify(manifest,null,2)});const zip=createStoreZip(entries),blob=new Blob([zip],{type:'application/zip'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(data.name||'xiaokai画布').replace(/[\\/:*?"<>|]/g,'-')+'.xiaokai.zip';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),3000);note(`完整项目包已导出（包含 ${sources.length} 张图片）`)}catch(error){console.error('[project package export]',error);note('导出失败：'+(error?.message||'无法打包项目'))}
+  }
+  async function readProjectPackage(file){
+    if(file.size>512*1024*1024)throw new Error('项目包超过512MB，请拆分画布后再导入');const buffer=await file.arrayBuffer(),bytes=new Uint8Array(buffer);
+    if(bytes.length<4||new DataView(buffer).getUint32(0,true)!==0x04034b50)return JSON.parse(zipTextDecoder.decode(bytes));
+    const entries=readStoreZip(buffer),projectBytes=entries.get('project.json');if(!projectBytes)throw new Error('项目包缺少 project.json');const manifestBytes=entries.get('manifest.json'),manifest=manifestBytes?JSON.parse(zipTextDecoder.decode(manifestBytes)):{assets:[]};let serialized=zipTextDecoder.decode(projectBytes);
+    const assets=Array.isArray(manifest.assets)?manifest.assets:[];for(let index=0;index<assets.length;index++){const asset=assets[index],assetBytes=entries.get(asset.path);if(!assetBytes)throw new Error('项目包缺少图片：'+asset.path);note(`正在恢复项目包图片 ${index+1}/${assets.length}…`);const restoredUrl=await restorePackageAsset(assetBytes,asset.mime||packageMime(asset.path));serialized=replaceEvery(serialized,'xiaokai-asset://'+asset.path,restoredUrl)}
+    const unresolved=serialized.match(/xiaokai-asset:\/\/[^"'<>\s]+/);if(unresolved)throw new Error('项目包内有图片缺失');return detachImportedProviderTasks(JSON.parse(serialized))
+  }
   function downloadJSON(data,name){const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name.replace(/[\\/:*?"<>|]/g,'-');a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
   function exportSelectedWorkflow(){if(!selectedNodes.size)return note('请先框选要导出的节点');const ids=new Set([...selectedNodes].map(n=>n.id)),data={format:'xiaokai-workflow',version:1,nodes:[...selectedNodes].map(captureNode),edges:[...document.querySelectorAll('.wire path[data-a][data-b]')].filter(p=>ids.has(p.dataset.a)&&ids.has(p.dataset.b)).map(p=>({a:p.dataset.a,b:p.dataset.b}))};downloadJSON(data,(document.getElementById('projectName').textContent||'KAI')+'-选中工作流.json');note('选中工作流已导出')}
   function importWorkflow(data){if(data?.format!=='xiaokai-workflow'||!Array.isArray(data.nodes))throw new Error('不是有效的工作流文件');const idMap=new Map(),created=[];data.nodes.forEach((saved,i)=>{if(!saved||typeof saved.html!=='string'||saved.html.includes('video-node')||saved.html.includes('video-art'))return;const t=document.createElement('template');t.innerHTML=saved.html.trim();const n=t.content.firstElementChild,old=n.id;n.id='node-'+Date.now()+'-'+i+'-'+Math.random().toString(16).slice(2);idMap.set(old,n.id);n.style.left=(parseFloat(n.style.left||0)+70)+'px';n.style.top=(parseFloat(n.style.top||0)+70)+'px';world.appendChild(n);nodes.push(n);bindNode(n);if(n.classList.contains('agent-node'))bindAgentNode(n);[...n.querySelectorAll('textarea,select,input:not([type="file"])')].forEach((x,j)=>{if(saved.fields?.[j])x.value=saved.fields[j].value});created.push(n)});const svg=document.querySelector('.wire');(data.edges||[]).forEach(edge=>{const a=idMap.get(edge.a),b=idMap.get(edge.b);if(!a||!b)return;const p=document.createElementNS('http://www.w3.org/2000/svg','path');p.dataset.a=a;p.dataset.b=b;svg.appendChild(p);bindEdge(p)});selectedNodes.clear();created.forEach(n=>selectedNodes.add(n));selectedNode=created.at(-1)||null;wires();updateSelectionBar();setActiveWires(selectedNodes);scheduleSave();note('工作流已导入')}
@@ -1140,7 +1195,9 @@
 
   document.getElementById('projectMenuButton').onclick=e=>{e.stopPropagation();document.getElementById('projectMenu').classList.toggle('open')};
   document.querySelectorAll('[data-project-action]').forEach(b=>b.onclick=async()=>{document.getElementById('projectMenu').classList.remove('open');const action=b.dataset.projectAction;if(action==='new')await newProject(false);if(action==='projects')await openProjects();if(action==='saveAs')await newProject(true);if(action==='save'){await saveProject();note('画布已保存')}if(action==='snapshot')await createNamedSnapshot();if(action==='snapshots')await openSnapshots();if(action==='exportSelection')exportSelectedWorkflow();if(action==='importWorkflow')document.getElementById('workflowImport').click();if(action==='export')exportProject();if(action==='import')document.getElementById('projectImport').click();if(action==='delete'&&confirm('删除当前画布？此操作不会删除素材库和 Skill 库。'))await deleteCurrentProject();if(action==='rename'){const name=prompt('输入项目名称',document.getElementById('projectName').textContent);if(name?.trim()){document.getElementById('projectName').textContent=name.trim();scheduleSave()}}});
-  document.getElementById('projectImport').onchange=e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{restoreProject(JSON.parse(reader.result));scheduleSave();note('画布备份导入成功')}catch(error){note('导入失败：'+error.message)}};reader.readAsText(file);e.target.value=''};
+  const projectImportInput=document.getElementById('projectImport');projectImportInput.accept='.zip,.xiaokai.zip,.json,.xiaokai';
+  document.querySelector('[data-project-action="export"]').textContent='↓　导出完整项目包';document.querySelector('[data-project-action="import"]').textContent='↑　导入完整项目包';
+  projectImportInput.onchange=async e=>{const file=e.target.files[0];if(!file)return;try{await saveProject();const data=await readProjectPackage(file);if(data?.format!=='xiaokai-canvas'||!Array.isArray(data.nodes))throw new Error('不是有效的KAI画布项目包');activeProjectId='p-'+Date.now();data.id=activeProjectId;localStorage.setItem('xiaokai-active-project',activeProjectId);restoreProject(data);await saveProject();note('完整项目包导入成功，图片和画布内容已恢复')}catch(error){note('导入失败：'+error.message)}finally{e.target.value=''}};
   document.getElementById('workflowImport').onchange=e=>{const file=e.target.files[0];if(!file)return;const reader=new FileReader();reader.onload=()=>{try{importWorkflow(JSON.parse(reader.result))}catch(error){note('工作流导入失败：'+error.message)}};reader.readAsText(file);e.target.value=''};
   document.getElementById('skillLoad').onclick=()=>{renderSkills();openDrawer('skillDrawer')};
   document.getElementById('fitAllButton').onclick=fitAll;
