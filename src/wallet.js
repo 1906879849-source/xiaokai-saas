@@ -401,6 +401,28 @@ function grant(amount, note = '管理员增加积分', idempotencyKey = '') {
   return publicWallet();
 }
 
+function resetBalance(note = '管理员清零积分') {
+  const previousBalance = Number(store.balance) || 0;
+  const previousReserved = Number(store.reserved) || 0;
+  const resetAt = Date.now();
+  Object.values(store.tasks || {}).forEach(item => {
+    if (item.state !== 'reserved') return;
+    item.state = 'released';
+    item.settledAt = resetAt;
+    item.error = '管理员清零积分，旧任务不再扣费';
+  });
+  Object.values(store.reservations || {}).forEach(item => {
+    if (item.state !== 'reserved') return;
+    item.state = 'released';
+    item.settledAt = resetAt;
+  });
+  store.balance = 0;
+  store.reserved = 0;
+  addLedger('admin_reset', -previousBalance, String(note || '管理员清零积分'), { previousBalance, previousReserved });
+  persist();
+  return publicWallet();
+}
+
 function pendingTasks() {
   return Object.values(store.tasks).filter(item => item.state === 'reserved');
 }
@@ -476,6 +498,7 @@ function pointValueRmb() { return POINT_VALUE_RMB; }
 module.exports = {
   publicWallet, quote, reserve, attachTasks, releaseUnattached,
   settleTask, settleVariableTask, recentLedger, pendingTasks, recentTasks, hasTask, ownsResultUrl, pricing, pointValueRmb, grant,
+  resetBalance,
   tasksByRequest,
   taskByRequest, recentAgentResults, releaseExpiredTasks, runAs, listUserIds,
 };
